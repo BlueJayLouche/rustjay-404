@@ -1,0 +1,110 @@
+[package]
+name = "rusty-404"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "High-performance video sampler inspired by SP-404"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/rusty-404"
+
+[workspace]
+resolver = "2"
+
+[dependencies]
+# Core
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.11"
+uuid = { version = "1.7", features = ["v4", "serde"] }
+
+# GPU / Rendering
+wgpu = { version = "25.0", features = ["spirv"] }
+winit = "0.30"
+pollster = "0.3"
+bytemuck = { version = "1.14", features = ["derive"] }
+
+# UI (ImGui)
+imgui = "0.12"
+imgui-wgpu = "0.25"
+imgui-winit-support = "0.13"
+
+# Math
+glam = { version = "0.25", features = ["bytemuck"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Video
+glob = "0.3"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+hap-wgpu = { path = "../crates/hap/hap-wgpu" }
+hap-qt = { path = "../crates/hap/hap-qt" }
+
+# Video Capture
+nokhwa = { version = "0.10", features = ["input-native"] }
+# NDI
+# ndi = "0.1"  # Or ndi-sdk bindings
+
+# MIDI
+midir = "0.9"
+
+# OSC
+rosc = "0.10"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Config directories
+dirs = "5.0"
+
+# Async channels
+crossbeam = "0.8"
+flume = "0.11"
+parking_lot = "0.12"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+rfd = "0.17.2"
+
+# Platform-specific dependencies for inter-app video
+[target.'cfg(target_os = "macos")'.dependencies]
+syphon-core = { path = "../crates/syphon/syphon-core" }
+syphon-wgpu = { path = "../crates/syphon/syphon-wgpu" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# windows = { version = "0.52", features = ["Win32_Graphics_Direct3D11"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# v4l2 = "0.1"
+
+# [dependencies.ffmpeg-next]
+# version = "6.1"
+# optional = true
+
+# [features]
+# default = ["ffmpeg"]
+# ffmpeg = ["dep:ffmpeg-next"]
+
+[[bin]]
+name = "simple_player"
+path = "src/bin/simple_player.rs"
+
+[[bin]]
+name = "test_decoder"
+path = "src/bin/test_decoder.rs"
+
+[[bin]]
+name = "hap_convert"
+path = "src/bin/hap_convert.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1

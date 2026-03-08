@@ -1,0 +1,41 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local config
+rusty404.toml
+
+# External reference resources
+HAP_reference_resources/hap/
+HAP_reference_resources/ofxHapPlayer/
+
+# Video files and samples (too large for git)
+samples/
+*.mov
+*.mp4
+*.avi
+*.mkv
+*.hap
+*.m4v
+*.webm
+*.ogv
+*.mpg
+*.mpeg
+*.wmv
+*.flv
+*.f4v
+
