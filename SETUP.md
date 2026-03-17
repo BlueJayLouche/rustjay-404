@@ -19,7 +19,23 @@ Syphon is included locally in the workspace:
 
 No installation needed - the build script handles linking.
 
-### 3. HAP Codecs (Optional)
+### 3. FFmpeg with Snappy (for HAP encoding/conversion)
+
+The `hap_convert` binary calls `ffmpeg` and `ffprobe` as system commands. FFmpeg must be built with snappy support for the HAP codec to work. The standard `brew install ffmpeg` does **not** include snappy — use `ffmpeg-full`:
+
+```bash
+brew install snappy     # usually already installed
+brew install ffmpeg-full
+```
+
+`ffmpeg-full` is keg-only but Homebrew links it automatically. Verify HAP support:
+
+```bash
+ffmpeg -codecs 2>&1 | grep -i hap
+# Expected: DEVIL. hap   Vidvox Hap
+```
+
+### 4. HAP Codecs (Optional)
 
 For HAP video support, install the HAP QuickTime codec or use the built-in software decoder.
 

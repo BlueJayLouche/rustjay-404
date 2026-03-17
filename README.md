@@ -98,7 +98,30 @@ Working implementation with:
 
 See [ROADMAP.md](ROADMAP.md) for future plans.
 
-## Building
+## Dependencies
+
+### FFmpeg with Snappy (required for HAP encoding/conversion)
+
+The `hap_convert` tool and HAP-related utilities require FFmpeg built with snappy support. The standard `brew install ffmpeg` does **not** include snappy. Install `ffmpeg-full` instead:
+
+```bash
+# snappy should already be installed, but just in case:
+brew install snappy
+
+# Install ffmpeg-full (includes --enable-libsnappy and the HAP codec)
+brew install ffmpeg-full
+```
+
+`ffmpeg-full` is keg-only but Homebrew links it automatically, so `ffmpeg` and `ffprobe` will be available in your PATH.
+
+To verify HAP support is present:
+
+```bash
+ffmpeg -codecs 2>&1 | grep -i hap
+# Should show: DEVIL. hap   Vidvox Hap
+```
+
+### Building
 
 Requires Rust 1.70+ and a GPU with BC texture compression support.
 
