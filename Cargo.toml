@@ -41,8 +41,8 @@ toml = "0.8"
 # Video
 glob = "0.3"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
-hap-wgpu = { path = "../crates/hap/hap-wgpu" }
-hap-qt = { path = "../crates/hap/hap-qt" }
+hap-wgpu = { path = "../hap-rs/hap-wgpu" }
+hap-qt = { path = "../hap-rs/hap-qt" }
 
 # Video Capture
 nokhwa = { version = "0.10", features = ["input-native"] }
@@ -72,8 +72,8 @@ rfd = "0.17.2"
 
 # Platform-specific dependencies for inter-app video
 [target.'cfg(target_os = "macos")'.dependencies]
-syphon-core = { path = "../crates/syphon/syphon-core" }
-syphon-wgpu = { path = "../crates/syphon/syphon-wgpu" }
+syphon-core = { path = "../syphon-rs/syphon-core" }
+syphon-wgpu = { path = "../syphon-rs/syphon-wgpu" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # windows = { version = "0.52", features = ["Win32_Graphics_Direct3D11"] }
