@@ -6,7 +6,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     {
         // Path to the local Syphon framework
-        let framework_path = std::path::PathBuf::from("../crates/syphon/syphon-lib");
+        let framework_path = std::path::PathBuf::from("../syphon-rs/syphon-lib");
         let framework_full = framework_path.canonicalize().unwrap_or_else(|_| framework_path.clone());
         
         if framework_path.join("Syphon.framework").exists() {
@@ -26,6 +26,6 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=Foundation");
         
         println!("cargo:rerun-if-changed=build.rs");
-        println!("cargo:rerun-if-changed=../crates/syphon/syphon-lib/Syphon.framework");
+        println!("cargo:rerun-if-changed=../syphon-rs/syphon-lib/Syphon.framework");
     }
 }
