@@ -1,4 +1,4 @@
-# Rusty-404
+# RustJay 404
 
 A high-performance video sampler inspired by the Roland SP-404, built in Rust with wgpu.
 
@@ -120,6 +120,31 @@ To verify HAP support is present:
 ffmpeg -codecs 2>&1 | grep -i hap
 # Should show: DEVIL. hap   Vidvox Hap
 ```
+
+### Syphon (macOS Only)
+
+RustJay 404 can receive video via Syphon input on macOS. The framework is included via the `syphon-rs` sibling repo.
+
+**Requirements:** The `syphon-rs` repo must be present as a sibling directory:
+```
+developer/rust/
+├── syphon-rs/          ← must exist
+├── hap-rs/             ← must also exist
+└── rustjay-404/
+```
+
+If your layout differs:
+```bash
+SYPHON_FRAMEWORK_DIR=/path/to/syphon-rs/syphon-lib cargo build --release
+```
+
+If you see `dyld: Library not loaded: Syphon.framework` at runtime, verify the framework exists at `../syphon-rs/syphon-lib/Syphon.framework`.
+
+### HAP Playback (`hap-rs`)
+
+HAP video decoding uses the local `hap-rs` sibling repo (path dependency). No additional installation is required — it builds automatically with the project.
+
+For encoding your source videos to HAP format, see the FFmpeg section above.
 
 ### Building
 
