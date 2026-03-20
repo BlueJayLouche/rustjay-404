@@ -1,11 +1,11 @@
 [package]
-name = "rusty-404"
+name = "rustjay-404"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
 description = "High-performance video sampler inspired by SP-404"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/rusty-404"
+repository = "https://github.com/BlueJayLouche/rustjay-404"
 
 [workspace]
 resolver = "2"
