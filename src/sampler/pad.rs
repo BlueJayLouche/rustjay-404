@@ -133,11 +133,15 @@ pub struct SamplePad {
     pub midi_note: Option<u8>,
 
     // Mixing
-    pub volume: f32,            // 0.0 - 1.0
+    pub volume: f32,            // 0.0 - 1.0 (effective, after modulation)
     pub blend_mode: BlendMode,  // Legacy blend mode
     pub mix_mode: PadMixMode,   // New mix mode with keying support
     pub key_params: PadKeyParams, // Keying parameters
-    
+
+    // Base values (user-set, before LFO/audio modulation)
+    pub base_volume: f32,
+    pub base_speed: f32,
+
     // Visual feedback
     pub trigger_level: f32,     // For UI animation (0.0 - 1.0)
 }
@@ -161,6 +165,8 @@ impl SamplePad {
             blend_mode: BlendMode::default(),
             mix_mode: PadMixMode::default(),
             key_params: PadKeyParams::default(),
+            base_volume: 1.0,
+            base_speed: 1.0,
             trigger_level: 0.0,
         }
     }
@@ -426,6 +432,8 @@ impl Clone for SamplePad {
             blend_mode: self.blend_mode,
             mix_mode: self.mix_mode,
             key_params: self.key_params,
+            base_volume: self.base_volume,
+            base_speed: self.base_speed,
             trigger_level: 0.0,
         }
     }

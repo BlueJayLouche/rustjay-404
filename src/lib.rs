@@ -1,6 +1,8 @@
 pub mod app;
+pub mod audio;
 pub mod engine;
 pub mod input;
+pub mod lfo;
 pub mod preset;
 pub mod sampler;
 pub mod sequencer;

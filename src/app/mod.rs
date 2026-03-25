@@ -1,13 +1,20 @@
 pub mod config;
 pub mod state;
 
+use crate::audio::routing::{ModulationTarget, RoutingMatrix};
+use crate::audio::AudioAnalyzer;
 use crate::engine::mixer::{ColorSpace, MixMode, VideoMixer};
 use crate::input::InputRouter;
+use crate::lfo::{LfoBank, LfoTarget};
 use crate::preset::{PresetData, PresetManager};
 use crate::sampler::BankManager;
 use crate::sequencer::SequencerEngine;
 use crate::ui::context::ImGuiContext;
+use crate::ui::windows::audio::AudioWindow;
 use crate::ui::windows::main::MainWindow;
+use crate::ui::windows::lfo::LfoWindow;
+use crate::ui::windows::preview::PreviewWindow;
+use crate::ui::windows::sequencer::SequencerWindow;
 use crate::ui::windows::video_settings::VideoSettingsWindow;
 use crate::video::recorder::LiveSampler;
 use crate::video::capture::webcam::list_cameras;
@@ -89,6 +96,13 @@ pub struct App {
     control_window: Option<Arc<Window>>,
     control_context: Option<ControlContext>,
     main_window: MainWindow,
+    preview_window: PreviewWindow,
+    sequencer_window: SequencerWindow,
+    lfo_window: LfoWindow,
+    lfo_bank: LfoBank,
+    audio_window: AudioWindow,
+    audio_analyzer: AudioAnalyzer,
+    audio_routing: RoutingMatrix,
     
     // Modifier keys
     shift_pressed: bool,
@@ -150,6 +164,13 @@ impl App {
             control_window: None,
             control_context: None,
             main_window: MainWindow::new(),
+            preview_window: PreviewWindow::new(),
+            sequencer_window: SequencerWindow::new(),
+            lfo_window: LfoWindow::new(),
+            lfo_bank: LfoBank::new(),
+            audio_window: AudioWindow::new(),
+            audio_analyzer: AudioAnalyzer::new(),
+            audio_routing: RoutingMatrix::default(),
             shift_pressed: false,
             live_sampler: None,
             recording_pad: None,
@@ -398,7 +419,21 @@ impl App {
         if self.control_window.is_some() {
             self.init_control_wgpu().await?;
         }
-        
+
+        // Create preview texture (needs both output config and control imgui context)
+        if let (Some(ref output_config), Some(ref mut ctx)) = (&self.output_surface_config, &mut self.control_context) {
+            let tex_id = ctx.imgui.create_preview_texture(
+                &device,
+                output_config.width,
+                output_config.height,
+                output_config.format,
+            );
+            self.preview_window.texture_id = Some(tex_id);
+            self.preview_window.width = output_config.width;
+            self.preview_window.height = output_config.height;
+            log::info!("Preview texture created: {}x{}", output_config.width, output_config.height);
+        }
+
         Ok(())
     }
     
@@ -870,7 +905,85 @@ impl App {
         
         // Process MIDI/OSC input events
         self.input_router.process_events(&mut self.bank_manager, &mut self.sequencer);
-        
+
+        // Reset modulated values to base values
+        {
+            let bank = self.bank_manager.current_bank_mut();
+            for pad in bank.pads.iter_mut() {
+                pad.volume = pad.base_volume;
+                pad.speed = pad.base_speed;
+            }
+        }
+
+        // Update LFOs and apply modulations
+        {
+            let bpm = self.sequencer.bpm();
+            let dt_secs = dt.as_secs_f32();
+            self.lfo_bank.update(bpm, dt_secs, 0.0);
+
+            let modulations = self.lfo_bank.get_modulations();
+            let bank = self.bank_manager.current_bank_mut();
+            for (target, value) in modulations {
+                match target {
+                    LfoTarget::PadOpacity(idx) => {
+                        if let Some(pad) = bank.pads.get_mut(idx) {
+                            pad.volume = (pad.volume + value).clamp(0.0, 1.0);
+                        }
+                    }
+                    LfoTarget::PadSpeed(idx) => {
+                        if let Some(pad) = bank.pads.get_mut(idx) {
+                            pad.speed += value;
+                            pad.direction = if pad.speed >= 0.0 { 1 } else { -1 };
+                        }
+                    }
+                    LfoTarget::MasterOpacity => {
+                        // Applied globally to all playing pads
+                        for pad in bank.pads.iter_mut() {
+                            if pad.is_playing {
+                                pad.volume = (pad.volume + value).clamp(0.0, 1.0);
+                            }
+                        }
+                    }
+                    LfoTarget::None => {}
+                }
+            }
+        }
+
+        // Update audio routing and apply modulations
+        if self.audio_analyzer.is_running() {
+            let fft = self.audio_analyzer.get_fft();
+            let dt_secs = dt.as_secs_f32();
+            self.audio_routing.process(&fft, dt_secs);
+
+            let bank = self.bank_manager.current_bank_mut();
+            for route in self.audio_routing.routes() {
+                if !route.enabled {
+                    continue;
+                }
+                match route.target {
+                    ModulationTarget::PadOpacity(idx) => {
+                        if let Some(pad) = bank.pads.get_mut(idx) {
+                            pad.volume = (pad.volume + route.current_value).clamp(0.0, 1.0);
+                        }
+                    }
+                    ModulationTarget::PadSpeed(idx) => {
+                        if let Some(pad) = bank.pads.get_mut(idx) {
+                            pad.speed += route.current_value;
+                            pad.direction = if pad.speed >= 0.0 { 1 } else { -1 };
+                        }
+                    }
+                    ModulationTarget::MasterOpacity => {
+                        for pad in bank.pads.iter_mut() {
+                            if pad.is_playing {
+                                pad.volume =
+                                    (pad.volume + route.current_value).clamp(0.0, 1.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Perform pending Syphon server refresh (macOS only)
         // This is done here to avoid calling Objective-C from event handlers
         #[cfg(target_os = "macos")]
@@ -951,6 +1064,37 @@ impl App {
             mixer.render(device, &mut encoder, queue, &view);
         }
         
+        // Copy output to preview texture for in-control-window display
+        if let Some(tex_id) = self.preview_window.texture_id {
+            if let Some(ref ctx) = self.control_context {
+                if let Some(preview_tex) = ctx.imgui.get_preview_texture(tex_id) {
+                    let copy_width = output.texture.width().min(self.preview_window.width);
+                    let copy_height = output.texture.height().min(self.preview_window.height);
+                    if copy_width > 0 && copy_height > 0 {
+                        encoder.copy_texture_to_texture(
+                            wgpu::TexelCopyTextureInfo {
+                                texture: &output.texture,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d::ZERO,
+                                aspect: wgpu::TextureAspect::All,
+                            },
+                            wgpu::TexelCopyTextureInfo {
+                                texture: preview_tex,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d::ZERO,
+                                aspect: wgpu::TextureAspect::All,
+                            },
+                            wgpu::Extent3d {
+                                width: copy_width,
+                                height: copy_height,
+                                depth_or_array_layers: 1,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
         // Publish to Syphon (macOS only)
         #[cfg(target_os = "macos")]
         {
@@ -959,7 +1103,7 @@ impl App {
                 syphon.publish_frame(&output.texture, device, queue);
             }
         }
-        
+
         queue.submit(std::iter::once(encoder.finish()));
         output.present();
         
@@ -1008,9 +1152,16 @@ impl App {
         let bank_manager = &mut self.bank_manager;
         let sequencer = &mut self.sequencer;
         let main_window = &mut self.main_window;
-        
+        let preview_window = &self.preview_window;
+        let sequencer_window = &mut self.sequencer_window;
+        let lfo_window = &self.lfo_window;
+        let lfo_bank = &mut self.lfo_bank;
+        let audio_window = &mut self.audio_window;
+        let audio_analyzer = &mut self.audio_analyzer;
+        let audio_routing = &mut self.audio_routing;
+
         let video_settings = &mut self.video_settings;
-        
+
         ctx.imgui.render(
             window,
             &device,
@@ -1019,6 +1170,21 @@ impl App {
             &view,
             |ui: &imgui::Ui| {
                 main_window.draw(ui, bank_manager, sequencer, &device, &queue, video_settings);
+                if main_window.show_preview {
+                    preview_window.draw(ui);
+                }
+                if main_window.show_sequencer {
+                    sequencer_window.draw(ui, sequencer);
+                }
+                if main_window.show_lfo {
+                    let bpm = sequencer.bpm();
+                    lfo_window.draw(ui, lfo_bank, bpm);
+                }
+                if main_window.show_audio {
+                    let mut bpm = sequencer.bpm();
+                    audio_window.draw(ui, audio_analyzer, audio_routing, &mut bpm);
+                    sequencer.set_bpm(bpm);
+                }
                 video_settings.draw(ui);
             }
         )?;

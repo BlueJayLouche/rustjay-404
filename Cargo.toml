@@ -53,6 +53,11 @@ nokhwa = { version = "0.10", features = ["input-native"] }
 # NDI
 # ndi = "0.1"  # Or ndi-sdk bindings
 
+# Audio Analysis
+cpal = "0.15"
+rustfft = "6.2"
+realfft = "3.3"
+
 # MIDI
 midir = "0.9"
 

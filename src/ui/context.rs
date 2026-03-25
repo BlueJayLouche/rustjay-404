@@ -133,4 +133,32 @@ impl ImGuiContext {
         // Always use 1.0 for framebuffer scale to prevent scissor rect issues
         self.imgui.io_mut().display_framebuffer_scale = [1.0, 1.0];
     }
+
+    /// Create a preview texture that can be displayed in ImGui and updated via GPU copy
+    pub fn create_preview_texture(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> imgui::TextureId {
+        let config = imgui_wgpu::TextureConfig {
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            label: Some("Preview Texture"),
+            format: Some(format),
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            ..Default::default()
+        };
+        let texture = imgui_wgpu::Texture::new(device, &self.renderer, config);
+        self.renderer.textures.insert(texture)
+    }
+
+    /// Get the underlying wgpu texture for an ImGui texture ID (for GPU copies)
+    pub fn get_preview_texture(&self, id: imgui::TextureId) -> Option<&wgpu::Texture> {
+        self.renderer.textures.get(id).map(|t| t.texture())
+    }
 }

@@ -1,0 +1,22 @@
+target_fps = 60
+vsync = true
+
+[output_window]
+width = 1280
+height = 720
+x = 100
+y = 100
+title = "Rusty-404 - Output"
+resizable = true
+decorated = true
+cursor_visible = false
+
+[control_window]
+width = 1200
+height = 800
+x = 50
+y = 50
+title = "Rusty-404 - Control"
+resizable = true
+decorated = true
+cursor_visible = true

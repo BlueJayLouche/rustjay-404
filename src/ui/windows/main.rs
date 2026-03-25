@@ -50,6 +50,11 @@ pub struct MainWindow {
     tap_tempo_info: String,
     /// Control window for file dialogs (fixes macOS focus)
     control_window: Option<std::sync::Arc<winit::window::Window>>,
+    /// Window visibility toggles
+    pub show_preview: bool,
+    pub show_sequencer: bool,
+    pub show_lfo: bool,
+    pub show_audio: bool,
 }
 
 impl MainWindow {
@@ -71,6 +76,10 @@ impl MainWindow {
             mouse_triggered: [false; 16],
             tap_tempo_info: "Tap 4+ times to set tempo".to_string(),
             control_window: None,
+            show_preview: false,
+            show_sequencer: true,
+            show_lfo: false,
+            show_audio: false,
         }
     }
     
@@ -134,6 +143,11 @@ impl MainWindow {
         // Main menu bar
         if let Some(_main_menu) = ui.begin_main_menu_bar() {
             if let Some(_view_menu) = ui.begin_menu("View") {
+                ui.menu_item_config("Preview").build_with_ref(&mut self.show_preview);
+                ui.menu_item_config("Sequencer").build_with_ref(&mut self.show_sequencer);
+                ui.menu_item_config("LFO").build_with_ref(&mut self.show_lfo);
+                ui.menu_item_config("Audio").build_with_ref(&mut self.show_audio);
+                ui.separator();
                 if ui.menu_item("Video Settings") {
                     video_settings.toggle();
                 }
@@ -154,9 +168,7 @@ impl MainWindow {
         self.draw_pad_grid(ui, bank_manager);
         ui.separator();
         
-        // Sequencer view
-        self.draw_sequencer(ui, sequencer);
-        ui.separator();
+        // Sequencer is in its own window (drawn from App render_control)
         
         // Mixer panel
         self.draw_mixer_panel(ui, bank_manager);
@@ -422,17 +434,20 @@ impl MainWindow {
                         // Playback speed (-5.0 to 5.0, default 1.0)
                         // Note: Reverse playback (-speed) may be choppy with streaming decoder
                         ui.set_next_item_width(120.0);
-                        if ui.slider("Speed", -5.0, 5.0, &mut pad.speed) {
-                            pad.speed = pad.speed.clamp(-5.0, 5.0);
-                            if pad.speed == 0.0 {
-                                pad.speed = 0.01;
+                        if ui.slider("Speed", -5.0, 5.0, &mut pad.base_speed) {
+                            pad.base_speed = pad.base_speed.clamp(-5.0, 5.0);
+                            if pad.base_speed == 0.0 {
+                                pad.base_speed = 0.01;
                             }
+                            pad.speed = pad.base_speed;
                             pad.direction = if pad.speed >= 0.0 { 1 } else { -1 };
                         }
-                        
+
                         // Opacity (for video mixing)
                         ui.set_next_item_width(120.0);
-                        ui.slider("Opacity", 0.0, 1.0, &mut pad.volume);
+                        if ui.slider("Opacity", 0.0, 1.0, &mut pad.base_volume) {
+                            pad.volume = pad.base_volume;
+                        }
                         
                         ui.separator();
                         ui.text("Mix Mode");
@@ -570,127 +585,6 @@ impl MainWindow {
                 }
                 
                 if col < 3 {
-                    ui.same_line();
-                }
-            }
-        }
-    }
-    
-    fn draw_sequencer(&self, ui: &Ui, sequencer: &mut SequencerEngine) {
-        ui.text("Sequencer");
-        
-        // Pattern display - get values first to avoid borrow issues
-        let (pattern_name, current_step, track_count, pattern_length) = {
-            let pattern = sequencer.current_pattern();
-            (
-                pattern.name.clone(),
-                sequencer.current_step(),
-                pattern.tracks.len(),
-                pattern.length()
-            )
-        };
-        
-        ui.text(format!("Pattern: {} | Tracks: {} | Step: {}/{}", 
-            pattern_name, track_count, current_step + 1, pattern_length));
-        
-        // Transport buttons row
-        if ui.button("Clear All") {
-            sequencer.current_pattern_mut().clear();
-        }
-        ui.same_line();
-        if ui.button("Randomize") {
-            sequencer.current_pattern_mut().randomize(0.3);
-        }
-        ui.same_line();
-        
-        // Pattern navigation
-        if ui.button("< Prev") {
-            sequencer.prev_pattern();
-        }
-        ui.same_line();
-        let queued = sequencer.queued_pattern.map(|q| q + 1).unwrap_or(sequencer.current_pattern + 1);
-        ui.text(format!("Pattern {}", queued));
-        ui.same_line();
-        if ui.button("Next >") {
-            sequencer.next_pattern();
-        }
-        
-        // Show first few tracks as a simple step grid
-        let step_size = [18.0f32, 18.0];
-        let max_display_tracks = 8; // Show first 8 tracks
-        let max_display_steps = 16; // Show 16 steps
-        
-        for track_idx in 0..max_display_tracks.min(track_count) {
-            // Get track info first
-            let (track_name, is_muted) = {
-                let track = &sequencer.current_pattern().tracks[track_idx];
-                (track.display_name(), track.muted)
-            };
-            
-            // Track label with mute indicator
-            let label = if is_muted {
-                format!("{:2}: [M]", track_idx + 1)
-            } else {
-                format!("{:2}:", track_idx + 1)
-            };
-            ui.text(&label);
-            
-            // Right-click on label to mute/unmute
-            if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
-                let track = &mut sequencer.current_pattern_mut().tracks[track_idx];
-                track.muted = !track.muted;
-            }
-            
-            // Tooltip with track name
-            if ui.is_item_hovered() {
-                ui.tooltip_text(&track_name);
-            }
-            
-            ui.same_line();
-            
-            // Step buttons for this track
-            for step_idx in 0..max_display_steps.min(pattern_length) {
-                let (is_active, is_current) = {
-                    let pattern = sequencer.current_pattern();
-                    let step = &pattern.tracks[track_idx].steps[step_idx];
-                    (step.active, step_idx == current_step)
-                };
-                
-                let color = if is_current && is_active {
-                    [0.0f32, 1.0, 0.0, 1.0] // Bright green - current playing
-                } else if is_current {
-                    [0.0f32, 0.5, 0.0, 1.0] // Dark green - current step
-                } else if is_active {
-                    [0.8f32, 0.8, 0.0, 1.0] // Yellow - active step
-                } else {
-                    [0.15f32, 0.15, 0.15, 1.0] // Dark gray - inactive
-                };
-                
-                let _token = ui.push_style_color(imgui::StyleColor::Button, color);
-                if ui.button_with_size(&format!("##t{}s{}", track_idx, step_idx), step_size) {
-                    // Toggle step on click
-                    sequencer.toggle_step(track_idx, step_idx);
-                }
-                drop(_token);
-                
-                // Tooltip showing step info
-                if ui.is_item_hovered() {
-                    let step_info = {
-                        let pattern = sequencer.current_pattern();
-                        let step = &pattern.tracks[track_idx].steps[step_idx];
-                        format!(
-                            "Track: {}\nStep: {}\nActive: {}\nVelocity: {:.0}%\nProb: {:.0}%",
-                            track_name,
-                            step_idx + 1,
-                            if step.active { "Yes" } else { "No" },
-                            step.velocity * 100.0,
-                            step.probability * 100.0
-                        )
-                    };
-                    ui.tooltip_text(step_info);
-                }
-                
-                if step_idx < max_display_steps - 1 {
                     ui.same_line();
                 }
             }
@@ -965,7 +859,9 @@ impl MainWindow {
             
             // Opacity slider (for video mixing)
             ui.set_next_item_width(60.0);
-            ui.slider(&format!("##opacity{}", i), 0.0, 1.0, &mut pad.volume);
+            if ui.slider(&format!("##opacity{}", i), 0.0, 1.0, &mut pad.base_volume) {
+                pad.volume = pad.base_volume;
+            }
             ui.same_line();
             
             // Mix mode combo
