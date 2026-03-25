@@ -36,7 +36,7 @@ fn debug_log(msg: &str) {
             OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("/tmp/rusty404_debug.log")
+                .open("/tmp/rustjay404_debug.log")
                 .unwrap()
         )
     });
@@ -631,12 +631,12 @@ impl App {
             Ok(port) => {
                 log::info!("OSC server started on port {}", port);
                 log::info!("OSC addresses:");
-                log::info!("  /rusty404/trigger <pad>      - Trigger pad (0-15)");
-                log::info!("  /rusty404/release <pad>      - Release pad");
-                log::info!("  /rusty404/volume <pad> <vol> - Set pad volume (0.0-1.0)");
-                log::info!("  /rusty404/speed <pad> <spd>  - Set pad speed (-2.0-2.0)");
-                log::info!("  /rusty404/bpm <bpm>          - Set BPM (20-999)");
-                log::info!("  /rusty404/stop               - Stop all pads");
+                log::info!("  /rustjay404/trigger <pad>    - Trigger pad (0-15)");
+                log::info!("  /rustjay404/release <pad>    - Release pad");
+                log::info!("  /rustjay404/volume <pad> <vol> - Set pad volume (0.0-1.0)");
+                log::info!("  /rustjay404/speed <pad> <spd>  - Set pad speed (-2.0-2.0)");
+                log::info!("  /rustjay404/bpm <bpm>        - Set BPM (20-999)");
+                log::info!("  /rustjay404/stop             - Stop all pads");
             }
             Err(e) => {
                 log::warn!("OSC server not started: {}", e);
@@ -677,8 +677,9 @@ impl App {
         let filename = format!("pad{}_rec_{}.mov", pad_index, timestamp);
         let output_path = samples_dir.join(&filename);
         
-        // Stop recording and save
-        let hap_path = sampler.stop_recording(&output_path)?;
+        // Stop recording and save using the configured HAP format
+        let hap_format = self.config.encoding.format;
+        let hap_path = sampler.stop_recording(&output_path, hap_format)?;
         
         // Load the HAP file into the pad
         if let Some(device) = &self.wgpu_device {
@@ -1026,38 +1027,24 @@ impl App {
         if self.video_settings.needs_refresh() {
             self.refresh_video_devices();
         }
-        
-        // Check if video device selection changed
-        let selected_device = self.video_settings.selected_camera();
-        if selected_device != self.video_device_index {
+
+        // Start webcam when the user explicitly clicks "Start Device"
+        if self.video_settings.take_start_webcam_requested() {
+            let selected_device = self.video_settings.selected_camera();
             self.switch_video_device(selected_device);
         }
-        
+
         // Handle Syphon server selection (macOS only)
         #[cfg(target_os = "macos")]
         {
             if self.video_settings.syphon_needs_refresh() {
                 self.refresh_syphon_servers();
             }
-            
-            // Check if Syphon server selection changed
-            let syphon_server = self.video_settings.selected_syphon_server().map(|s| s.to_string());
-            let input_type = self.video_settings.input_source_type();
-            let is_initializing = self.video_settings.is_initializing();
-            
-            if let Some(server_name) = syphon_server {
-                // Only switch if we're in Syphon mode
-                if input_type == crate::ui::windows::video_settings::InputSourceType::Syphon {
-                    // Check if we need to switch (either no sampler or different source)
-                    let should_switch = self.live_sampler.as_ref().map_or(true, |_| {
-                        // We would need to track the current Syphon server name to check if it changed
-                        // For now, just switch if the user selected a different server
-                        true
-                    });
-                    
-                    if should_switch && !is_initializing {
-                        self.switch_syphon_server(&server_name);
-                    }
+
+            // Connect to Syphon only when the user explicitly clicks "Start Syphon"
+            if self.video_settings.take_start_syphon_requested() {
+                if let Some(server_name) = self.video_settings.selected_syphon_server().map(|s| s.to_string()) {
+                    self.switch_syphon_server(&server_name);
                 }
             }
         }
@@ -1170,7 +1157,6 @@ impl App {
     #[cfg(target_os = "macos")]
     fn refresh_syphon_servers(&mut self) {
         if self.syphon_discovery_receiver.is_some() {
-            log::debug!("Syphon discovery already in progress");
             return;
         }
         

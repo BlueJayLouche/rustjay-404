@@ -152,23 +152,23 @@ fn parse_osc_message(msg: &OscMessage) -> Option<OscEvent> {
     let args = &msg.args;
     
     // Address patterns:
-    // /rusty404/trigger 1       - trigger pad 1
-    // /rusty404/release 1       - release pad 1
-    // /rusty404/volume 1 0.8    - set pad 1 volume to 0.8
-    // /rusty404/speed 1 1.5     - set pad 1 speed to 1.5
-    // /rusty404/bpm 120         - set BPM to 120
-    // /rusty404/stop            - stop all
+    // /rustjay404/trigger 1     - trigger pad 1
+    // /rustjay404/release 1     - release pad 1
+    // /rustjay404/volume 1 0.8  - set pad 1 volume to 0.8
+    // /rustjay404/speed 1 1.5   - set pad 1 speed to 1.5
+    // /rustjay404/bpm 120       - set BPM to 120
+    // /rustjay404/stop          - stop all
     
     let parts: Vec<&str> = addr.split('/').filter(|s| !s.is_empty()).collect();
     
     match parts.as_slice() {
-        ["rusty404", "trigger"] => {
+        ["rustjay404", "trigger"] => {
             args.get(0).and_then(|a| a.clone().int()).map(|i| OscEvent::Trigger { pad: i as usize })
         }
-        ["rusty404", "release"] => {
+        ["rustjay404", "release"] => {
             args.get(0).and_then(|a| a.clone().int()).map(|i| OscEvent::Release { pad: i as usize })
         }
-        ["rusty404", "volume"] => {
+        ["rustjay404", "volume"] => {
             if let (Some(pad), Some(vol)) = (
                 args.get(0).and_then(|a| a.clone().int()),
                 args.get(1).and_then(|a| match a {
@@ -182,7 +182,7 @@ fn parse_osc_message(msg: &OscMessage) -> Option<OscEvent> {
                 None
             }
         }
-        ["rusty404", "speed"] => {
+        ["rustjay404", "speed"] => {
             if let (Some(pad), Some(speed)) = (
                 args.get(0).and_then(|a| a.clone().int()),
                 args.get(1).and_then(|a| match a {
@@ -196,14 +196,14 @@ fn parse_osc_message(msg: &OscMessage) -> Option<OscEvent> {
                 None
             }
         }
-        ["rusty404", "bpm"] => {
+        ["rustjay404", "bpm"] => {
             args.get(0).and_then(|a| match a {
                 OscType::Float(f) => Some(OscEvent::Bpm(*f)),
                 OscType::Int(i) => Some(OscEvent::Bpm(*i as f32)),
                 _ => None,
             })
         }
-        ["rusty404", "stop"] => {
+        ["rustjay404", "stop"] => {
             Some(OscEvent::Command("stop".to_string()))
         }
         _ => {

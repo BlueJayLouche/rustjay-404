@@ -44,6 +44,10 @@ image = { version = "0.24", default-features = false, features = ["png", "jpeg"]
 hap-wgpu = { path = "../hap-rs/hap-wgpu" }
 hap-qt = { path = "../hap-rs/hap-qt" }
 
+# Native video decoding (no ffmpeg required)
+mp4 = "0.14"
+openh264 = "0.6"
+
 # Video Capture
 nokhwa = { version = "0.10", features = ["input-native"] }
 # NDI
@@ -65,6 +69,9 @@ dirs = "5.0"
 crossbeam = "0.8"
 flume = "0.11"
 parking_lot = "0.12"
+
+# Parallel encoding
+rayon = "1.10"
 
 # CLI
 clap = { version = "4.4", features = ["derive"] }
@@ -100,6 +107,10 @@ path = "src/bin/test_decoder.rs"
 [[bin]]
 name = "hap_convert"
 path = "src/bin/hap_convert.rs"
+
+[[bin]]
+name = "native_hap_encode"
+path = "src/bin/native_hap_encode.rs"
 
 [profile.release]
 opt-level = 3

@@ -1,11 +1,11 @@
-use rusty_404::app::App;
-use rusty_404::video::encoder::{HapEncoder, HapEncoderConfig, HapEncodeFormat, batch_encode, convert_capture_to_hap};
+use rustjay_404::app::App;
+use rustjay_404::video::encoder::{HapEncoder, HapEncoderConfig, HapEncodeFormat, GpuMode, batch_encode, convert_capture_to_hap};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "rusty-404")]
+#[command(name = "rustjay-404")]
 #[command(about = "High-performance video sampler inspired by SP-404")]
 #[command(version)]
 struct Cli {
@@ -173,8 +173,8 @@ fn run_simple_player(video_path: &PathBuf, loop_playback: bool) -> anyhow::Resul
 
     // Load HAP video using BoundaryCachedDecoder for smooth looping
     println!("Loading HAP video: {:?}", video_path);
-    use rusty_404::video::decoder::boundary_cached::BoundaryCachedDecoder;
-    use rusty_404::sampler::sample::VideoDecoder;
+    use rustjay_404::video::decoder::boundary_cached::BoundaryCachedDecoder;
+    use rustjay_404::sampler::sample::VideoDecoder;
     
     let mut decoder = BoundaryCachedDecoder::new(video_path, device.clone(), queue.clone())?;
     let (width, height) = decoder.resolution();
@@ -418,7 +418,7 @@ fn run_midi_test(output_path: &PathBuf, duration_secs: u64) -> anyhow::Result<()
     
     // Setup MIDI
     let (tx, rx) = std::sync::mpsc::channel();
-    let mut midi = rusty_404::input::midi::MidiController::new(tx)?;
+    let mut midi = rustjay_404::input::midi::MidiController::new(tx)?;
     
     // Try to connect
     match midi.auto_connect() {
@@ -431,7 +431,7 @@ fn run_midi_test(output_path: &PathBuf, duration_secs: u64) -> anyhow::Result<()
             println!("Failed to connect to MIDI: {}", e);
             println!("Available ports:");
             writeln!(log_file, "Failed to connect: {}", e)?;
-            for (idx, name) in rusty_404::input::midi::MidiController::list_ports()? {
+            for (idx, name) in rustjay_404::input::midi::MidiController::list_ports()? {
                 println!("  [{}] {}", idx, name);
                 writeln!(log_file, "  [{}] {}", idx, name)?;
             }
@@ -480,7 +480,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         None | Some(Commands::Run { simple: false, .. }) => {
             // Run the main application
-            log::info!("Starting Rusty-404...");
+            log::info!("Starting Rustjay-404...");
             
             let rt = Arc::new(tokio::runtime::Runtime::new()?);
             let app = App::new(rt)?;
@@ -512,6 +512,7 @@ fn main() -> anyhow::Result<()> {
                 fps: fps.unwrap_or(0),
                 chunks,
                 quality: 5,
+                gpu_mode: GpuMode::Auto,
             };
             
             // Run batch encoding

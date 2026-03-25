@@ -734,21 +734,22 @@ impl MainWindow {
     fn handle_file_dialog_result(
         &mut self, 
         _bank_manager: &mut BankManager,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue
+        device: &wgpu::Device,
+        queue: &wgpu::Queue
     ) {
         if let Some(ref receiver) = self.file_dialog_receiver {
             if let Ok(Some(path)) = receiver.try_recv() {
-                // Start the import process
-                self.start_import(path);
+                // Start the import process with GPU support
+                self.start_import(path, device, queue);
                 self.file_dialog_receiver = None;
             }
         }
     }
     
-    /// Start video import with HAP conversion
-    fn start_import(&mut self, path: PathBuf) {
-        use crate::video::import::VideoImporter;
+    /// Start video import with HAP conversion (GPU-accelerated)
+    fn start_import(&mut self, path: PathBuf, device: &wgpu::Device, queue: &wgpu::Queue) {
+        use crate::video::import::{VideoImporter, ImportConfig};
+        use std::sync::Arc;
         
         let filename = path.file_name()
             .and_then(|n| n.to_str())
@@ -761,15 +762,21 @@ impl MainWindow {
         
         self.importing_path = Some(filename);
         
-        // Spawn import task
+        // Spawn import task with GPU context
         let (tx, rx) = flume::bounded(1);
         self.import_receiver = Some(rx);
         
+        // Clone device and queue for the thread (Arc makes them Send + Sync)
+        let device = Arc::new(device.clone());
+        let queue = Arc::new(queue.clone());
+        
         std::thread::spawn(move || {
-            use crate::video::import::import_video;
+            // Create importer with GPU acceleration
+            let config = ImportConfig::default();
+            let mut importer = VideoImporter::with_gpu(config, device, queue);
             
             // Import and convert to HAP (or just return path if already HAP)
-            let result = import_video(&path, None);
+            let result = importer.import(&path);
             
             // Send result back
             let msg = match result {

@@ -14,7 +14,7 @@ fn debug_log(msg: &str) {
             OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("/tmp/rusty404_debug.log")
+                .open("/tmp/rustjay404_debug.log")
                 .unwrap()
         )
     });

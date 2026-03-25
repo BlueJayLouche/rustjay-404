@@ -5,6 +5,7 @@
 //! - Control window: ImGui UI, cursor visible, standard window
 
 use serde::{Deserialize, Serialize};
+use crate::video::encoder::{HapEncodeFormat, GpuMode};
 
 /// Main application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +18,33 @@ pub struct AppConfig {
     pub target_fps: u32,
     /// Enable VSync
     pub vsync: bool,
+    /// Encoding settings
+    #[serde(default)]
+    pub encoding: EncodingConfig,
+}
+
+/// Encoding configuration for HAP video output
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncodingConfig {
+    /// HAP format for encoding/recording
+    pub format: HapEncodeFormat,
+    /// GPU encoding mode: auto, gpu, or cpu
+    pub gpu_mode: GpuMode,
+    /// Maximum pixel dimension (width or height) for imported videos.
+    /// Larger videos are scaled down preserving aspect ratio.
+    /// 0 = no limit (keep original resolution).
+    /// Default: 1920 (keeps Retina screen recordings manageable)
+    pub max_dimension: u32,
+}
+
+impl Default for EncodingConfig {
+    fn default() -> Self {
+        Self {
+            format: HapEncodeFormat::Dxt1,
+            gpu_mode: GpuMode::Auto,
+            max_dimension: 1920,
+        }
+    }
 }
 
 /// Window configuration
@@ -65,6 +93,7 @@ impl Default for AppConfig {
             },
             target_fps: 60,
             vsync: true,
+            encoding: EncodingConfig::default(),
         }
     }
 }
@@ -72,7 +101,7 @@ impl Default for AppConfig {
 impl AppConfig {
     /// Load configuration from file or create default
     pub fn load_or_default() -> Self {
-        let config_path = std::path::PathBuf::from("rusty404.toml");
+        let config_path = std::path::PathBuf::from("rustjay404.toml");
         
         if config_path.exists() {
             match std::fs::read_to_string(&config_path) {
@@ -102,7 +131,7 @@ impl AppConfig {
     
     /// Save configuration to file
     pub fn save(&self) -> anyhow::Result<()> {
-        let config_path = std::path::PathBuf::from("rusty404.toml");
+        let config_path = std::path::PathBuf::from("rustjay404.toml");
         let toml = toml::to_string_pretty(self)?;
         std::fs::write(&config_path, toml)?;
         Ok(())

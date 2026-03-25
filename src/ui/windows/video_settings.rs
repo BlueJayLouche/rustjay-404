@@ -36,6 +36,8 @@ pub struct VideoSettingsWindow {
     initializing: bool,
     /// Current input source type
     input_source_type: InputSourceType,
+    /// User clicked "Start Device" — app should start the selected webcam
+    start_webcam_requested: bool,
     /// Syphon server list (macOS only)
     #[cfg(target_os = "macos")]
     syphon_servers: Vec<String>,
@@ -45,6 +47,9 @@ pub struct VideoSettingsWindow {
     /// Syphon server list needs refresh
     #[cfg(target_os = "macos")]
     syphon_needs_refresh: bool,
+    /// User clicked "Start Syphon" — app should connect the selected server
+    #[cfg(target_os = "macos")]
+    start_syphon_requested: bool,
 }
 
 impl VideoSettingsWindow {
@@ -57,12 +62,15 @@ impl VideoSettingsWindow {
             last_error: None,
             initializing: false,
             input_source_type: InputSourceType::Webcam,
+            start_webcam_requested: false,
             #[cfg(target_os = "macos")]
             syphon_servers: Vec::new(),
             #[cfg(target_os = "macos")]
             selected_syphon_server: -1,
             #[cfg(target_os = "macos")]
             syphon_needs_refresh: true,
+            #[cfg(target_os = "macos")]
+            start_syphon_requested: false,
         }
     }
     
@@ -113,7 +121,22 @@ impl VideoSettingsWindow {
     pub fn set_input_source_type(&mut self, source_type: InputSourceType) {
         self.input_source_type = source_type;
     }
-    
+
+    /// Returns true (and clears the flag) if the user clicked "Start Device"
+    pub fn take_start_webcam_requested(&mut self) -> bool {
+        let v = self.start_webcam_requested;
+        self.start_webcam_requested = false;
+        v
+    }
+
+    /// Returns true (and clears the flag) if the user clicked "Start Syphon"
+    #[cfg(target_os = "macos")]
+    pub fn take_start_syphon_requested(&mut self) -> bool {
+        let v = self.start_syphon_requested;
+        self.start_syphon_requested = false;
+        v
+    }
+
     /// Get selected Syphon server name (macOS only)
     #[cfg(target_os = "macos")]
     pub fn selected_syphon_server(&self) -> Option<&str> {
@@ -212,13 +235,17 @@ impl VideoSettingsWindow {
                 let input_type = self.input_source_type;
                 match input_type {
                     InputSourceType::Webcam => {
-                        Self::draw_webcam_controls_helper(&mut self.cameras, &mut self.selected_camera, 
-                            &mut self.needs_refresh, self.initializing, &mut self.last_error, ui);
+                        if Self::draw_webcam_controls_helper(&mut self.cameras, &mut self.selected_camera,
+                            &mut self.needs_refresh, self.initializing, &mut self.last_error, ui) {
+                            self.start_webcam_requested = true;
+                        }
                     }
                     #[cfg(target_os = "macos")]
                     InputSourceType::Syphon => {
-                        Self::draw_syphon_controls_helper(&mut self.syphon_servers, &mut self.selected_syphon_server, 
-                            &mut self.syphon_needs_refresh, self.initializing, &mut self.last_error, ui);
+                        if Self::draw_syphon_controls_helper(&mut self.syphon_servers, &mut self.selected_syphon_server,
+                            &mut self.syphon_needs_refresh, self.initializing, &mut self.last_error, ui) {
+                            self.start_syphon_requested = true;
+                        }
                     }
                 }
             });
@@ -226,6 +253,7 @@ impl VideoSettingsWindow {
         self.visible = opened;
     }
     
+    /// Returns true if the user clicked "Start Device".
     fn draw_webcam_controls_helper(
         cameras: &mut Vec<(u32, String)>,
         selected_camera: &mut i32,
@@ -233,31 +261,33 @@ impl VideoSettingsWindow {
         initializing: bool,
         last_error: &mut Option<String>,
         ui: &Ui
-    ) {
+    ) -> bool {
+        let mut start_requested = false;
+
         ui.text("Camera Device");
         ui.separator();
-        
+
         // Refresh button
         if ui.button("Refresh Devices") {
             *needs_refresh = true;
         }
-        
+
         ui.same_line();
-        
+
         // Show device count
         if cameras.is_empty() {
             ui.text_disabled("(No devices found)");
         } else {
             ui.text(format!("({} devices)", cameras.len()));
         }
-        
+
         ui.spacing();
-        
+
         // Show initialization status
         if initializing {
             ui.text_colored([1.0, 0.8, 0.0, 1.0], "Initializing device...");
         }
-        
+
         // Show error if any
         if let Some(ref error) = last_error {
             ui.text_colored([1.0, 0.0, 0.0, 1.0], "Error:");
@@ -267,7 +297,7 @@ impl VideoSettingsWindow {
             }
             ui.spacing();
         }
-        
+
         // Camera dropdown
         if !cameras.is_empty() {
             let preview = if initializing {
@@ -277,7 +307,7 @@ impl VideoSettingsWindow {
             } else {
                 "Select camera...".to_string()
             };
-            
+
             ui.set_next_item_width(300.0);
             if let Some(_combo) = ui.begin_combo("Device", &preview) {
                 for (_idx, (id, name)) in cameras.iter().enumerate() {
@@ -289,24 +319,32 @@ impl VideoSettingsWindow {
                     }
                 }
             }
+
+            ui.spacing();
+            if !initializing && ui.button("Start Device") {
+                start_requested = true;
+            }
         } else {
             ui.text_disabled("No cameras available");
             if *needs_refresh {
                 ui.text("(Click Refresh to scan for devices)");
             }
         }
-        
+
         ui.spacing();
         ui.separator();
-        
+
         // Current selection info
         if let Some((id, name)) = cameras.get(*selected_camera as usize) {
             ui.text("Selected:");
             ui.text(format!("  Index: {}", id));
             ui.text(format!("  Name: {}", name));
         }
+
+        start_requested
     }
     
+    /// Returns true if the user clicked "Start Syphon".
     #[cfg(target_os = "macos")]
     fn draw_syphon_controls_helper(
         syphon_servers: &mut Vec<String>,
@@ -315,31 +353,33 @@ impl VideoSettingsWindow {
         initializing: bool,
         last_error: &mut Option<String>,
         ui: &Ui
-    ) {
+    ) -> bool {
+        let mut start_requested = false;
+
         ui.text("Syphon Server");
         ui.separator();
-        
+
         // Refresh button
         if ui.button("Refresh Servers") {
             *syphon_needs_refresh = true;
         }
-        
+
         ui.same_line();
-        
+
         // Show server count
         if syphon_servers.is_empty() {
             ui.text_disabled("(No servers found)");
         } else {
             ui.text(format!("({} servers)", syphon_servers.len()));
         }
-        
+
         ui.spacing();
-        
+
         // Show initialization status
         if initializing {
             ui.text_colored([1.0, 0.8, 0.0, 1.0], "Connecting...");
         }
-        
+
         // Show error if any
         if let Some(ref error) = last_error {
             ui.text_colored([1.0, 0.0, 0.0, 1.0], "Error:");
@@ -349,18 +389,18 @@ impl VideoSettingsWindow {
             }
             ui.spacing();
         }
-        
+
         // Server dropdown
         if !syphon_servers.is_empty() {
             let preview = if initializing {
                 "Connecting...".to_string()
-            } else if *selected_syphon_server >= 0 && 
+            } else if *selected_syphon_server >= 0 &&
                       (*selected_syphon_server as usize) < syphon_servers.len() {
                 syphon_servers[*selected_syphon_server as usize].clone()
             } else {
                 "Select server...".to_string()
             };
-            
+
             ui.set_next_item_width(300.0);
             if let Some(_combo) = ui.begin_combo("Server", &preview) {
                 for (idx, name) in syphon_servers.iter().enumerate() {
@@ -372,6 +412,15 @@ impl VideoSettingsWindow {
                     }
                 }
             }
+
+            ui.spacing();
+            if !initializing
+                && *selected_syphon_server >= 0
+                && (*selected_syphon_server as usize) < syphon_servers.len()
+                && ui.button("Start Syphon")
+            {
+                start_requested = true;
+            }
         } else {
             ui.text_disabled("No Syphon servers available");
             if *syphon_needs_refresh {
@@ -380,16 +429,18 @@ impl VideoSettingsWindow {
                 ui.text("Make sure a Syphon server is running (e.g., Resolume, Simple Server)");
             }
         }
-        
+
         ui.spacing();
         ui.separator();
-        
+
         // Current selection info
-        if *selected_syphon_server >= 0 && 
+        if *selected_syphon_server >= 0 &&
            (*selected_syphon_server as usize) < syphon_servers.len() {
             ui.text("Selected:");
             ui.text(format!("  Server: {}", syphon_servers[*selected_syphon_server as usize]));
         }
+
+        start_requested
     }
 }
 

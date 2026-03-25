@@ -74,7 +74,7 @@ impl InputRouter {
     fn default_config_path() -> PathBuf {
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| std::env::temp_dir())
-            .join("rusty404");
+            .join("rustjay404");
         
         std::fs::create_dir_all(&config_dir).ok();
         config_dir.join("midi_mapping.json")

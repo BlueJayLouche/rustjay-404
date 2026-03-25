@@ -53,68 +53,63 @@ impl Recording {
         self.start_time.elapsed()
     }
     
-    /// Save recording as HAP file using ffmpeg
-    pub fn save_to_hap(&self, output_path: &Path) -> anyhow::Result<()> {
-        use std::process::Command;
-        use std::fs::File;
-        use std::io::Write;
-        
+    /// Save recording as HAP file using native encoding
+    ///
+    /// # Arguments
+    /// * `output_path` - Where to write the .mov file
+    /// * `format` - HAP format to encode to (DXT1 is fastest, DXT5-YCoCg is highest quality)
+    pub fn save_to_hap(
+        &self,
+        output_path: &Path,
+        format: crate::video::encoder::HapEncodeFormat,
+    ) -> anyhow::Result<()> {
+        use rayon::prelude::*;
+        use crate::video::encoder::encode_frames_to_hap;
+
         if self.frames.is_empty() {
             return Err(anyhow::anyhow!("No frames to save"));
         }
-        
-        // Create temp directory for raw frames
-        let temp_dir = std::env::temp_dir().join("rusty404_recording");
-        std::fs::create_dir_all(&temp_dir)?;
-        
+
         let (width, height) = self.resolution;
-        
+
         log::info!(
-            "Saving {} frames ({}x{} @ {}fps) to HAP...",
+            "Saving {} frames ({}x{} @ {}fps) as {:?} using native encoder...",
             self.frames.len(),
             width,
             height,
-            self.fps
+            self.fps,
+            format
         );
-        
-        // Write frames as raw video file
-        // Format: raw RGBA
-        let raw_path = temp_dir.join("recording.raw");
-        let mut raw_file = File::create(&raw_path)?;
-        
-        for frame in &self.frames {
-            // Convert YUYV to RGB if needed, or just write as-is
-            // For now, write raw frame data
-            raw_file.write_all(&frame.data)?;
-        }
-        drop(raw_file);
-        
-        // Use ffmpeg to encode to HAP
-        // Frame data is RGB24 (3 bytes per pixel from nokhwa)
-        let fps_str = format!("{}", self.fps);
-        
-        let status = Command::new("ffmpeg")
-            .args(&[
-                "-f", "rawvideo",
-                "-pix_fmt", "rgb24",
-                "-s", &format!("{}x{}", width, height),
-                "-r", &fps_str,
-                "-i", raw_path.to_str().unwrap(),
-                "-c:v", "hap",
-                "-format", "hap",
-                "-pix_fmt", "rgba", // HAP outputs RGBA
-                "-y", // Overwrite output
-                output_path.to_str().unwrap(),
-            ])
-            .status()?;
-        
-        // Cleanup temp file
-        let _ = std::fs::remove_file(&raw_path);
-        
-        if !status.success() {
-            return Err(anyhow::anyhow!("ffmpeg encoding failed"));
-        }
-        
+
+        // Parallel RGB24 → RGBA32 conversion
+        let rgba_frames: Vec<Vec<u8>> = self.frames.par_iter()
+            .map(|frame| {
+                if frame.data.len() == (frame.width * frame.height * 3) as usize {
+                    let pixel_count = (frame.width * frame.height) as usize;
+                    let mut rgba = vec![0u8; pixel_count * 4];
+                    for (i, rgb) in frame.data.chunks_exact(3).enumerate() {
+                        let off = i * 4;
+                        rgba[off] = rgb[0];
+                        rgba[off + 1] = rgb[1];
+                        rgba[off + 2] = rgb[2];
+                        rgba[off + 3] = 255;
+                    }
+                    rgba
+                } else {
+                    frame.data.clone()
+                }
+            })
+            .collect();
+
+        encode_frames_to_hap(
+            &rgba_frames,
+            width,
+            height,
+            self.fps,
+            format,
+            output_path,
+        )?;
+
         log::info!("Recording saved to: {:?}", output_path);
         Ok(())
     }
@@ -210,11 +205,23 @@ impl LiveSampler {
     
     /// Start recording
     pub fn start_recording(&mut self) -> anyhow::Result<()> {
-        if self.webcam.is_none() {
-            return Err(anyhow::anyhow!("No capture source initialized"));
-        }
-        
-        let resolution = self.webcam.as_ref().unwrap().resolution();
+        // Determine resolution from whichever capture source is active
+        let resolution = if let Some(ref webcam) = self.webcam {
+            webcam.resolution()
+        } else {
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(ref syphon) = self.syphon {
+                    syphon.resolution()
+                } else {
+                    return Err(anyhow::anyhow!("No capture source initialized"));
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                return Err(anyhow::anyhow!("No capture source initialized"));
+            }
+        };
         
         // Flush stale frames from webcam buffer before starting
         // This prevents the first recorded frame being from before recording started
@@ -233,7 +240,11 @@ impl LiveSampler {
     }
     
     /// Stop recording and save to file
-    pub fn stop_recording(&mut self, output_path: &Path) -> anyhow::Result<PathBuf> {
+    pub fn stop_recording(
+        &mut self,
+        output_path: &Path,
+        format: crate::video::encoder::HapEncodeFormat,
+    ) -> anyhow::Result<PathBuf> {
         *self.state.lock().unwrap() = RecordingState::Encoding;
         
         if let Some(mut recording) = self.current_recording.take() {
@@ -256,7 +267,7 @@ impl LiveSampler {
                 }
             }
             
-            recording.save_to_hap(output_path)?;
+            recording.save_to_hap(output_path, format)?;
             *self.state.lock().unwrap() = RecordingState::Idle;
             Ok(output_path.to_path_buf())
         } else {
