@@ -22,7 +22,14 @@ impl ImGuiContext {
         surface_format: wgpu::TextureFormat,
     ) -> anyhow::Result<Self> {
         let mut imgui = Context::create();
-        imgui.set_ini_filename(None); // Don't save settings to disk
+
+        // Persist window layout between restarts
+        if let Some(config_dir) = dirs::config_dir() {
+            let app_dir = config_dir.join("rustjay404");
+            let _ = std::fs::create_dir_all(&app_dir);
+            let ini_path = app_dir.join("imgui.ini");
+            imgui.set_ini_filename(Some(ini_path));
+        }
 
         // Setup platform - use Locked HiDpi mode to prevent automatic scaling
         let mut platform = WinitPlatform::init(&mut imgui);

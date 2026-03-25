@@ -50,8 +50,8 @@ openh264 = "0.6"
 
 # Video Capture
 nokhwa = { version = "0.10", features = ["input-native"] }
-# NDI
-# ndi = "0.1"  # Or ndi-sdk bindings
+# NDI (Network Device Interface) — optional; enable with --features ndi
+grafton-ndi = { version = "0.11", optional = true }
 
 # Audio Analysis
 cpal = "0.15"
@@ -97,9 +97,9 @@ syphon-wgpu = { path = "../syphon-rs/syphon-wgpu" }
 # version = "6.1"
 # optional = true
 
-# [features]
-# default = ["ffmpeg"]
-# ffmpeg = ["dep:ffmpeg-next"]
+[features]
+default = ["ndi"]
+ndi = ["grafton-ndi"]
 
 [[bin]]
 name = "simple_player"

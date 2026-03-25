@@ -6,6 +6,7 @@ use crate::audio::AudioAnalyzer;
 use crate::engine::mixer::{ColorSpace, MixMode, VideoMixer};
 use crate::input::InputRouter;
 use crate::lfo::{LfoBank, LfoTarget};
+use crate::output::OutputManager;
 use crate::preset::{PresetData, PresetManager};
 use crate::sampler::BankManager;
 use crate::sequencer::SequencerEngine;
@@ -17,9 +18,7 @@ use crate::ui::windows::preview::PreviewWindow;
 use crate::ui::windows::sequencer::SequencerWindow;
 use crate::ui::windows::video_settings::VideoSettingsWindow;
 use crate::video::recorder::LiveSampler;
-use crate::video::capture::webcam::list_cameras;
-#[cfg(target_os = "macos")]
-use crate::video::interapp::InterAppVideo;
+use crate::video_input::{InputCommand, VideoInputManager};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -30,9 +29,67 @@ use winit::{
 };
 
 use self::config::AppConfig;
+use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
+
+/// Tap tempo calculator — averages intervals between taps to derive BPM.
+/// A single tap resets LFO phase without changing BPM.
+struct TapTempo {
+    taps: VecDeque<Instant>,
+    max_taps: usize,
+    /// Max interval between taps before history is cleared (2 seconds)
+    timeout_secs: f64,
+}
+
+impl TapTempo {
+    fn new() -> Self {
+        Self {
+            taps: VecDeque::new(),
+            max_taps: 8,
+            timeout_secs: 2.0,
+        }
+    }
+
+    /// Register a tap. Returns Some(bpm) if enough taps to calculate,
+    /// None for a single tap (phase reset only).
+    fn tap(&mut self) -> Option<f32> {
+        let now = Instant::now();
+
+        // If last tap was too long ago, start fresh
+        if let Some(&last) = self.taps.back() {
+            if now.duration_since(last).as_secs_f64() > self.timeout_secs {
+                self.taps.clear();
+            }
+        }
+
+        self.taps.push_back(now);
+
+        // Keep only the last N taps
+        while self.taps.len() > self.max_taps {
+            self.taps.pop_front();
+        }
+
+        // Need at least 2 taps to calculate BPM
+        if self.taps.len() < 2 {
+            return None;
+        }
+
+        // Average interval between consecutive taps
+        let intervals: Vec<f64> = self.taps
+            .iter()
+            .zip(self.taps.iter().skip(1))
+            .map(|(a, b)| b.duration_since(*a).as_secs_f64())
+            .collect();
+
+        let avg_interval = intervals.iter().sum::<f64>() / intervals.len() as f64;
+        let bpm = 60.0 / avg_interval;
+
+        // Clamp to reasonable range
+        Some((bpm as f32).clamp(20.0, 300.0))
+    }
+}
 
 fn debug_log(msg: &str) {
     use std::sync::OnceLock;
@@ -88,9 +145,8 @@ pub struct App {
     output_mixer: Option<VideoMixer>,
     output_fullscreen: bool,
     
-    // Inter-app video output (Syphon/Spout)
-    #[cfg(target_os = "macos")]
-    syphon_output: Option<crate::video::interapp::SyphonOutput>,
+    // Unified output manager (Syphon, future NDI/V4L2)
+    output_manager: OutputManager,
     
     // Control window (ImGui UI)
     control_window: Option<Arc<Window>>,
@@ -106,10 +162,15 @@ pub struct App {
     
     // Modifier keys
     shift_pressed: bool,
+
+    // Tap tempo
+    tap_tempo: TapTempo,
     
-    // Live sampler for recording
+    // Unified video input manager (webcam, Syphon)
+    video_input: VideoInputManager,
+    // Recording state
     live_sampler: Option<LiveSampler>,
-    recording_pad: Option<usize>, // Which pad is currently recording
+    recording_pad: Option<usize>,
     
     // UI command receiver
     ui_command_receiver: Option<flume::Receiver<crate::ui::windows::main::UICommand>>,
@@ -122,14 +183,6 @@ pub struct App {
     
     // Video settings window
     video_settings: VideoSettingsWindow,
-    // Current video device index
-    video_device_index: u32,
-    // Pending Syphon server refresh (macOS only) - deferred to avoid event handler issues
-    #[cfg(target_os = "macos")]
-    syphon_refresh_pending: bool,
-    // Channel for receiving Syphon discovery results from background thread
-    #[cfg(target_os = "macos")]
-    syphon_discovery_receiver: Option<flume::Receiver<Vec<String>>>,
 }
 
 impl App {
@@ -159,8 +212,7 @@ impl App {
             output_surface_config: None,
             output_mixer: None,
             output_fullscreen: false,
-            #[cfg(target_os = "macos")]
-            syphon_output: None,
+            output_manager: OutputManager::new(),
             control_window: None,
             control_context: None,
             main_window: MainWindow::new(),
@@ -172,17 +224,14 @@ impl App {
             audio_analyzer: AudioAnalyzer::new(),
             audio_routing: RoutingMatrix::default(),
             shift_pressed: false,
+            tap_tempo: TapTempo::new(),
+            video_input: VideoInputManager::new(),
             live_sampler: None,
             recording_pad: None,
             ui_command_receiver: None,
             input_router,
             preset_manager,
             video_settings: VideoSettingsWindow::new(),
-            video_device_index: 0,
-            #[cfg(target_os = "macos")]
-            syphon_refresh_pending: false,
-            #[cfg(target_os = "macos")]
-            syphon_discovery_receiver: None,
         })
     }
 
@@ -369,33 +418,17 @@ impl App {
         self.output_surface_config = Some(output_config);
         self.output_mixer = Some(mixer);
         
-        // Initialize Syphon output on macOS
+        // Initialize outputs via OutputManager
         #[cfg(target_os = "macos")]
         {
-            if crate::video::interapp::SyphonOutput::is_available() {
-                match crate::video::interapp::SyphonOutput::new(
-                    "Rusty-404",
-                    &device,
-                    &queue,
-                    output_size.width,
-                    output_size.height,
-                ) {
-                    Ok(syphon) => {
-                        let is_zero_copy = syphon.is_zero_copy();
-                        self.syphon_output = Some(syphon);
-                        if is_zero_copy {
-                            log::info!("Syphon output initialized with zero-copy support");
-                        } else {
-                            log::info!("Syphon output initialized (CPU fallback mode)");
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to initialize Syphon output: {}", e);
-                        log::warn!("Ensure Syphon.framework is installed at /Library/Frameworks/");
-                    }
-                }
-            } else {
-                log::warn!("Syphon not available on this system");
+            if let Err(e) = self.output_manager.start_syphon(
+                "Rusty-404",
+                &device,
+                &queue,
+                output_size.width,
+                output_size.height,
+            ) {
+                log::warn!("Syphon output not available: {}", e);
             }
         }
         
@@ -408,9 +441,12 @@ impl App {
         // Set up UI command channel
         let cmd_receiver = self.main_window.setup_command_channel();
         self.ui_command_receiver = Some(cmd_receiver);
-        
-        // Initialize live sampler
-        self.init_live_sampler();
+
+        // Initialize video input manager — start device discovery, try default webcam
+        self.video_input.begin_refresh_devices();
+        if let Err(e) = self.video_input.start_webcam(0) {
+            log::warn!("Could not initialize default webcam: {}", e);
+        }
         
         // Initialize MIDI/OSC input
         self.init_input();
@@ -542,13 +578,26 @@ impl App {
                         winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) => {
                             event_loop.exit();
                         }
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
+                            if self.shift_pressed {
+                                self.sequencer.reset_position();
+                                self.lfo_bank.reset_all();
+                            } else {
+                                self.sequencer.toggle_playback();
+                            }
+                        }
                         winit::keyboard::Key::Character(ch) => {
                             let key = ch.to_lowercase();
-                            
+
                             if self.shift_pressed && key == "f" {
                                 self.toggle_fullscreen();
-                            } else if self.shift_pressed && key == " " {
-                                self.sequencer.toggle_playback();
+                            } else if self.shift_pressed && key == "t" {
+                                // Tap tempo: always reset LFO phase
+                                self.lfo_bank.reset_all();
+                                if let Some(bpm) = self.tap_tempo.tap() {
+                                    self.sequencer.set_bpm(bpm);
+                                    log::info!("Tap tempo: {:.1} BPM", bpm);
+                                }
                             }
                         }
                         _ => {}
@@ -606,13 +655,34 @@ impl App {
                     _ => {}
                 }
                 
-                if event.state == winit::event::ElementState::Pressed {
-                    if let winit::keyboard::Key::Character(ch) = &event.logical_key {
-                        let key = ch.to_lowercase();
-                        
-                        if self.shift_pressed && key == " " {
-                            self.sequencer.toggle_playback();
+                // Don't process shortcuts when ImGui is capturing keyboard (text input)
+                let imgui_wants_keyboard = self.control_context
+                    .as_ref()
+                    .map(|ctx| ctx.imgui.imgui.io().want_capture_keyboard)
+                    .unwrap_or(false);
+
+                if event.state == winit::event::ElementState::Pressed && !imgui_wants_keyboard {
+                    match &event.logical_key {
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
+                            if self.shift_pressed {
+                                self.sequencer.reset_position();
+                                self.lfo_bank.reset_all();
+                            } else {
+                                self.sequencer.toggle_playback();
+                            }
                         }
+                        winit::keyboard::Key::Character(ch) => {
+                            let key = ch.to_lowercase();
+
+                            if self.shift_pressed && key == "t" {
+                                self.lfo_bank.reset_all();
+                                if let Some(bpm) = self.tap_tempo.tap() {
+                                    self.sequencer.set_bpm(bpm);
+                                    log::info!("Tap tempo: {:.1} BPM", bpm);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -633,17 +703,10 @@ impl App {
         }
     }
     
-    /// Initialize the live sampler (call when wgpu is ready)
-    fn init_live_sampler(&mut self) {
+    /// Ensure a LiveSampler exists for recording
+    fn ensure_recorder(&mut self) {
         if self.live_sampler.is_none() {
-            let mut sampler = LiveSampler::new();
-            // Try to init webcam, but don't fail if no camera
-            if let Err(e) = sampler.init_webcam(0) {
-                log::warn!("Could not initialize webcam: {}", e);
-            } else {
-                log::info!("Live sampler initialized with webcam");
-            }
-            self.live_sampler = Some(sampler);
+            self.live_sampler = Some(LiveSampler::new());
         }
     }
     
@@ -681,20 +744,23 @@ impl App {
     
     /// Start recording to a specific pad
     fn start_recording(&mut self, pad_index: usize) -> anyhow::Result<()> {
-        if self.live_sampler.is_none() {
-            self.init_live_sampler();
+        if !self.video_input.is_active() {
+            return Err(anyhow::anyhow!("No active video input"));
         }
-        
+
+        self.ensure_recorder();
         let sampler = self.live_sampler.as_mut().ok_or_else(|| anyhow::anyhow!("No sampler available"))?;
-        
+
         if sampler.state() == crate::video::recorder::RecordingState::Recording {
             return Err(anyhow::anyhow!("Already recording"));
         }
-        
-        sampler.start_recording()?;
+
+        // Use resolution from the active video input
+        let resolution = self.video_input.resolution();
+        sampler.start_recording_with_resolution(resolution)?;
         self.recording_pad = Some(pad_index);
-        
-        log::info!("Started recording to pad {}", pad_index);
+
+        log::info!("Started recording to pad {} at {}x{}", pad_index, resolution.0, resolution.1);
         Ok(())
     }
     
@@ -840,18 +906,23 @@ impl App {
                     }
                 }
                 crate::ui::windows::main::UICommand::RefreshVideoDevices => {
-                    self.refresh_video_devices();
+                    self.video_input.begin_refresh_devices();
                 }
                 crate::ui::windows::main::UICommand::SelectVideoDevice(index) => {
-                    if index != self.video_device_index {
-                        self.switch_video_device(index);
+                    if let Err(e) = self.video_input.start_webcam(index) {
+                        log::error!("Failed to start webcam {}: {}", index, e);
+                        self.video_settings.set_error(Some(format!("{}", e)));
                     }
                 }
                 crate::ui::windows::main::UICommand::RefreshSyphonServers => {
-                    self.refresh_syphon_servers();
+                    self.video_input.begin_refresh_devices();
                 }
                 crate::ui::windows::main::UICommand::SelectSyphonServer(server_name) => {
-                    self.switch_syphon_server(&server_name);
+                    #[cfg(target_os = "macos")]
+                    if let Err(e) = self.video_input.start_syphon(&server_name) {
+                        log::error!("Failed to connect Syphon '{}': {}", server_name, e);
+                        self.video_settings.set_error(Some(format!("{}", e)));
+                    }
                 }
             }
         }
@@ -871,14 +942,42 @@ impl App {
             .map(|s| s.state() == crate::video::recorder::RecordingState::Recording)
             .unwrap_or(false);
         self.main_window.set_recording_state(is_recording, self.recording_pad);
-        
+
         let now = Instant::now();
         let dt = now - self.last_update;
         self.last_update = now;
-        
-        // Update live sampler (capture frames if recording)
-        if let Some(sampler) = self.live_sampler.as_mut() {
-            sampler.update();
+
+        // Poll for device discovery results and update video settings UI
+        if self.video_input.poll_discovery() {
+            self.video_settings.update_camera_list(
+                self.video_input.webcam_devices.clone(),
+            );
+            #[cfg(target_os = "macos")]
+            {
+                let server_names: Vec<String> = self.video_input.syphon_servers
+                    .iter()
+                    .map(|s| s.display_name().to_string())
+                    .collect();
+                self.video_settings.update_syphon_servers(server_names);
+            }
+            #[cfg(feature = "ndi")]
+            {
+                self.video_settings.update_ndi_sources(
+                    self.video_input.ndi_sources.clone(),
+                );
+            }
+        }
+
+        // Update video input (poll frames from active backend)
+        self.video_input.update();
+
+        // If recording, feed frames from video input into the recorder
+        if is_recording {
+            if let Some(frame) = self.video_input.take_frame() {
+                if let Some(sampler) = self.live_sampler.as_mut() {
+                    sampler.add_frame(frame.to_captured_frame());
+                }
+            }
         }
         
         // Update bank (pad playback)
@@ -984,12 +1083,7 @@ impl App {
             }
         }
 
-        // Perform pending Syphon server refresh (macOS only)
-        // This is done here to avoid calling Objective-C from event handlers
-        #[cfg(target_os = "macos")]
-        if self.syphon_refresh_pending {
-            self.perform_syphon_refresh();
-        }
+        // VideoInputManager handles all async discovery — no more pending refresh
     }
     
     /// Render output window (video)
@@ -1095,14 +1189,8 @@ impl App {
             }
         }
 
-        // Publish to Syphon (macOS only)
-        #[cfg(target_os = "macos")]
-        {
-            if let Some(ref mut syphon) = self.syphon_output {
-                // Publish the output texture to Syphon
-                syphon.publish_frame(&output.texture, device, queue);
-            }
-        }
+        // Submit to all active outputs (Syphon, future NDI/V4L2)
+        self.output_manager.submit_frame(&output.texture, device, queue);
 
         queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -1189,32 +1277,94 @@ impl App {
             }
         )?;
         
-        // Handle video settings after render
+        // Handle video settings requests after render
         if self.video_settings.needs_refresh() {
-            self.refresh_video_devices();
+            self.video_input.begin_refresh_devices();
         }
 
-        // Start webcam when the user explicitly clicks "Start Device"
         if self.video_settings.take_start_webcam_requested() {
             let selected_device = self.video_settings.selected_camera();
-            self.switch_video_device(selected_device);
+            if let Err(e) = self.video_input.start_webcam(selected_device) {
+                log::error!("Failed to start webcam {}: {}", selected_device, e);
+                self.video_settings.set_error(Some(format!("{}", e)));
+            } else {
+                self.video_settings.set_initializing(false);
+            }
         }
 
-        // Handle Syphon server selection (macOS only)
         #[cfg(target_os = "macos")]
         {
             if self.video_settings.syphon_needs_refresh() {
-                self.refresh_syphon_servers();
+                self.video_input.begin_refresh_devices();
             }
 
-            // Connect to Syphon only when the user explicitly clicks "Start Syphon"
             if self.video_settings.take_start_syphon_requested() {
                 if let Some(server_name) = self.video_settings.selected_syphon_server().map(|s| s.to_string()) {
-                    self.switch_syphon_server(&server_name);
+                    if let Err(e) = self.video_input.start_syphon(&server_name) {
+                        log::error!("Failed to connect Syphon '{}': {}", server_name, e);
+                        self.video_settings.set_error(Some(format!("{}", e)));
+                    } else {
+                        self.video_settings.set_initializing(false);
+                    }
                 }
             }
+
+            // Syphon output toggle
+            if self.video_settings.take_start_syphon_output_requested() {
+                if let (Some(device), Some(queue)) = (self.wgpu_device.as_ref(), self.wgpu_queue.as_ref()) {
+                    let w = self.config.output_window.width;
+                    let h = self.config.output_window.height;
+                    let name = self.video_settings.syphon_output_name().to_string();
+                    if let Err(e) = self.output_manager.start_syphon(
+                        &name, device, queue, w, h
+                    ) {
+                        log::error!("Failed to start Syphon output: {}", e);
+                        self.video_settings.set_error(Some(format!("{}", e)));
+                    }
+                }
+            }
+            if self.video_settings.take_stop_syphon_output_requested() {
+                self.output_manager.stop_syphon();
+            }
+            self.video_settings.set_syphon_output_active(self.output_manager.is_syphon_active());
         }
-        
+
+        // NDI input
+        #[cfg(feature = "ndi")]
+        {
+            if self.video_settings.ndi_needs_refresh() {
+                self.video_input.begin_refresh_devices();
+            }
+
+            if self.video_settings.take_start_ndi_requested() {
+                if let Some(source_name) = self.video_settings.selected_ndi_source().map(|s| s.to_string()) {
+                    if let Err(e) = self.video_input.start_ndi(&source_name) {
+                        log::error!("Failed to connect NDI '{}': {}", source_name, e);
+                        self.video_settings.set_error(Some(format!("{}", e)));
+                    } else {
+                        self.video_settings.set_initializing(false);
+                    }
+                }
+            }
+
+            // NDI output toggle
+            if self.video_settings.take_start_ndi_output_requested() {
+                let w = self.config.output_window.width;
+                let h = self.config.output_window.height;
+                let name = self.video_settings.ndi_output_name().to_string();
+                if let Err(e) = self.output_manager.start_ndi(
+                    &name, w, h, false
+                ) {
+                    log::error!("Failed to start NDI output: {}", e);
+                    self.video_settings.set_error(Some(format!("{}", e)));
+                }
+            }
+            if self.video_settings.take_stop_ndi_output_requested() {
+                self.output_manager.stop_ndi();
+            }
+            self.video_settings.set_ndi_output_active(self.output_manager.is_ndi_active());
+        }
+
         queue.submit(std::iter::once(encoder.finish()));
         output.present();
         
@@ -1243,177 +1393,6 @@ impl App {
         });
     }
     
-    /// Get list of available cameras
-    fn get_camera_list(&self) -> Vec<(u32, String)> {
-        match list_cameras() {
-            Ok(cameras) => cameras,
-            Err(e) => {
-                log::error!("Failed to list cameras: {}", e);
-                Vec::new()
-            }
-        }
-    }
-    
-    /// Refresh video device list
-    fn refresh_video_devices(&mut self) {
-        let cameras = self.get_camera_list();
-        self.video_settings.update_camera_list(cameras);
-    }
-    
-    /// Switch to a different video device
-    fn switch_video_device(&mut self, device_index: u32) {
-        // Don't switch if already initializing this device
-        if self.video_settings.is_initializing() {
-            return;
-        }
-        
-        log::info!("Switching to video device {}", device_index);
-        self.video_settings.set_initializing(true);
-        self.video_settings.clear_error();
-        
-        // If there's an active recording, cancel it first
-        if let Some(ref mut sampler) = self.live_sampler {
-            if sampler.state() == crate::video::recorder::RecordingState::Recording {
-                log::warn!("Cannot switch device while recording - canceling recording");
-                sampler.cancel_recording();
-            }
-        }
-        
-        // Store the old device index in case we need to restore
-        let old_device_index = self.video_device_index;
-        
-        // Drop the current sampler and create a new one with the new device
-        self.live_sampler = None;
-        
-        let mut sampler = LiveSampler::new();
-        match sampler.init_webcam(device_index) {
-            Ok(()) => {
-                log::info!("Live sampler reinitialized with device {}", device_index);
-                self.video_device_index = device_index;
-                self.live_sampler = Some(sampler);
-                self.video_settings.set_initializing(false);
-            }
-            Err(e) => {
-                let error_msg = format!("{}", e);
-                log::error!("Failed to initialize webcam device {}: {}", device_index, error_msg);
-                self.video_settings.set_error(Some(error_msg));
-                self.video_settings.set_initializing(false);
-                
-                // Restore the UI selection to the old device
-                self.video_settings.update_camera_list(self.get_camera_list());
-                
-                // Try to restore the old device if it wasn't the one we just tried
-                if old_device_index != device_index {
-                    log::info!("Attempting to restore previous device {}", old_device_index);
-                    let mut restore_sampler = LiveSampler::new();
-                    if restore_sampler.init_webcam(old_device_index).is_ok() {
-                        log::info!("Restored previous device {}", old_device_index);
-                        self.video_device_index = old_device_index;
-                        self.live_sampler = Some(restore_sampler);
-                    } else {
-                        log::error!("Failed to restore previous device");
-                    }
-                }
-            }
-        }
-    }
-    
-    /// Request Syphon server list refresh (macOS only)
-    /// Runs discovery in a background thread to avoid NSRunLoop re-entrancy issues
-    #[cfg(target_os = "macos")]
-    fn refresh_syphon_servers(&mut self) {
-        if self.syphon_discovery_receiver.is_some() {
-            return;
-        }
-        
-        let (tx, rx) = flume::bounded(1);
-        self.syphon_discovery_receiver = Some(rx);
-        
-        std::thread::spawn(move || {
-            use crate::video::interapp::SyphonDiscovery;
-            
-            let discovery = SyphonDiscovery::new();
-            let servers: Vec<String> = discovery.discover_servers()
-                .into_iter()
-                .map(|s| s.display_name().to_string())
-                .collect();
-            
-            log::info!("Discovered {} Syphon servers (background thread)", servers.len());
-            let _ = tx.send(servers);
-        });
-        
-        log::debug!("Syphon server refresh started in background thread");
-    }
-    
-    /// Stub for non-macOS platforms
-    #[cfg(not(target_os = "macos"))]
-    fn refresh_syphon_servers(&mut self) {
-        // No-op on non-macOS platforms
-    }
-    
-    /// Check for completed Syphon discovery and update UI (macOS only)
-    /// This is called from update() to avoid event handler issues
-    #[cfg(target_os = "macos")]
-    fn perform_syphon_refresh(&mut self) {
-        if let Some(ref receiver) = self.syphon_discovery_receiver {
-            if let Ok(servers) = receiver.try_recv() {
-                log::info!("Received {} Syphon servers from discovery thread", servers.len());
-                self.video_settings.update_syphon_servers(servers);
-                self.syphon_discovery_receiver = None;
-                self.syphon_refresh_pending = false;
-            }
-        } else {
-            // No active discovery, clear pending flag
-            self.syphon_refresh_pending = false;
-        }
-    }
-    
-    /// Switch to a different Syphon server (macOS only)
-    #[cfg(target_os = "macos")]
-    fn switch_syphon_server(&mut self, server_name: &str) {
-        use crate::video::recorder::LiveSampler;
-        
-        // Don't switch if already initializing
-        if self.video_settings.is_initializing() {
-            return;
-        }
-        
-        log::info!("Switching to Syphon server: {}", server_name);
-        self.video_settings.set_initializing(true);
-        self.video_settings.clear_error();
-        
-        // If there's an active recording, cancel it first
-        if let Some(ref mut sampler) = self.live_sampler {
-            if sampler.state() == crate::video::recorder::RecordingState::Recording {
-                log::warn!("Cannot switch server while recording - canceling recording");
-                sampler.cancel_recording();
-            }
-        }
-        
-        // Drop the current sampler and create a new one with the Syphon source
-        self.live_sampler = None;
-        
-        let mut sampler = LiveSampler::new();
-        match sampler.init_syphon(server_name) {
-            Ok(()) => {
-                log::info!("Live sampler reinitialized with Syphon server: {}", server_name);
-                self.live_sampler = Some(sampler);
-                self.video_settings.set_initializing(false);
-            }
-            Err(e) => {
-                let error_msg = format!("{}", e);
-                log::error!("Failed to initialize Syphon server '{}': {}", server_name, error_msg);
-                self.video_settings.set_error(Some(error_msg));
-                self.video_settings.set_initializing(false);
-            }
-        }
-    }
-    
-    /// Stub for non-macOS platforms
-    #[cfg(not(target_os = "macos"))]
-    fn switch_syphon_server(&mut self, _server_name: &str) {
-        log::warn!("Syphon is only available on macOS");
-    }
 }
 
 /// winit ApplicationHandler implementation

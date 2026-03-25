@@ -15,9 +15,13 @@ A high-performance video sampler inspired by the Roland SP-404, built in Rust wi
   - **Advanced**: Overlay, Soft Light, Hard Light, Difference, Lighten, Darken
   - **Keying**: Chroma Key (green/blue screen), Luma Key (brightness-based)
 - **Per-Channel Controls**: Opacity, mix mode, and keying parameters per channel
-- **Live Sampling**: Capture from webcam, auto-convert to HAP, assign to pads
+- **Live Sampling**: Capture from webcam or Syphon input, auto-convert to HAP, assign to pads
+- **NDI I/O**: Network Device Interface input and output for video over IP
+- **Syphon I/O**: Zero-copy GPU-path Syphon input and output (macOS)
 - **Pro I/O**: MIDI input for pad triggering, OSC server for remote control
+- **Tap Tempo**: Shift+T for tap tempo with automatic phase reset
 - **SP-404 Style Interface**: 16-pad grid with GATE, LATCH, and ONE-SHOT trigger modes
+- **Persistent Layout**: Window positions and sizes saved between sessions
 
 ## Quick Start
 
@@ -62,10 +66,17 @@ cargo run -- --simple --file video.hap.mov --loop-playback
 
 ### Sequencer
 - Click step buttons to toggle on/off
+- Beat numbers and alternating group shading every 4 steps for visual clarity
 - **Clear All**: Clear current pattern
 - **Randomize**: Generate random pattern
 - **Prev/Next**: Switch between 16 patterns
 - **Play/Stop**: Control playback
+
+### Keyboard Shortcuts
+- **Space**: Play/stop sequencer
+- **Shift+Space**: Reset sequencer position to beat 1
+- **Shift+T**: Tap tempo (single tap resets phase, consecutive taps set BPM)
+- **Shift+F**: Toggle fullscreen
 
 ### Mixer Panel
 - **Opacity**: Per-channel transparency (0.0 = invisible, 1.0 = fully visible)
@@ -94,6 +105,10 @@ Working implementation with:
 - ✅ MIDI input for pad triggering
 - ✅ OSC server for remote control
 - ✅ Live webcam sampling
+- ✅ NDI input/output (Network Device Interface)
+- ✅ Syphon input/output with zero-copy GPU path (macOS)
+- ✅ Tap tempo with phase reset
+- ✅ Persistent window layout
 - ✅ JSON preset save/load
 
 See [ROADMAP.md](ROADMAP.md) for future plans.
@@ -139,6 +154,19 @@ SYPHON_FRAMEWORK_DIR=/path/to/syphon-rs/syphon-lib cargo build --release
 ```
 
 If you see `dyld: Library not loaded: Syphon.framework` at runtime, verify the framework exists at `../syphon-rs/syphon-lib/Syphon.framework`.
+
+### NDI (Network Device Interface)
+
+NDI support is enabled by default via the `ndi` feature flag. It requires the NDI SDK for Apple to be installed.
+
+**Install the NDI SDK:**
+1. Download from [ndi.video](https://ndi.video/tools/download/)
+2. Run the installer — it places `libndi.dylib` in `/Library/NDI SDK for Apple/lib/macOS/`
+
+The build script automatically adds the NDI SDK library path to the binary's rpath. To disable NDI:
+```bash
+cargo build --release --no-default-features
+```
 
 ### HAP Playback (`hap-rs`)
 

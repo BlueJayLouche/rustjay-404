@@ -104,6 +104,22 @@ impl SequencerWindow {
         let max_display_tracks = 16;
         let step_size = [20.0f32, 18.0];
 
+        // Beat number labels above the grid
+        // Offset to align with step buttons (M + S + track label + spacing)
+        let label_offset = 20.0 + 4.0 + 20.0 + 4.0 + 24.0 + 4.0; // M btn + gap + S btn + gap + label + gap
+        ui.set_cursor_pos([ui.cursor_pos()[0] + label_offset, ui.cursor_pos()[1]]);
+        for step_idx in 0..pattern_length.min(64) {
+            if step_idx % 4 == 0 {
+                if step_idx > 0 {
+                    ui.same_line_with_spacing(0.0, 6.0);
+                }
+                let beat_num = step_idx / 4 + 1;
+                let _c = ui.push_style_color(imgui::StyleColor::Text, [0.5, 0.5, 0.5, 1.0]);
+                ui.text(format!("{:<4}", beat_num));
+                drop(_c);
+            }
+        }
+
         // Check if any track has solo enabled
         let any_solo = (0..track_count).any(|i| sequencer.current_pattern().tracks[i].solo);
 
@@ -180,7 +196,13 @@ impl SequencerWindow {
                     let v = velocity.clamp(0.0, 1.0);
                     [0.3 + v * 0.5, 0.3 + v * 0.5, 0.0, 1.0] // Yellow, brighter with velocity
                 } else {
-                    [0.12f32, 0.12, 0.12, 1.0] // Dark gray - inactive
+                    // Alternating shade per 4-beat group for visual grouping
+                    let group = step_idx / 4;
+                    if group % 2 == 0 {
+                        [0.12f32, 0.12, 0.12, 1.0] // Dark gray - even groups
+                    } else {
+                        [0.16f32, 0.16, 0.16, 1.0] // Slightly lighter - odd groups
+                    }
                 };
 
                 let _token = ui.push_style_color(imgui::StyleColor::Button, color);

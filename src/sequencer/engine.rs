@@ -105,6 +105,15 @@ impl SequencerEngine {
         }
     }
 
+    /// Reset all tracks to step 0 without stopping playback
+    pub fn reset_position(&mut self) {
+        self.clock.reset();
+        for track in &mut self.patterns[self.current_pattern].tracks {
+            track.reset();
+        }
+        log::info!("Sequencer position reset to 0");
+    }
+
     /// Update sequencer - call every frame
     pub fn update(&mut self) -> &[SequencerEvent] {
         // Update tap tempo flash

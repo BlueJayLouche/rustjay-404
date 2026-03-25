@@ -203,7 +203,7 @@ impl LiveSampler {
         *self.state.lock().unwrap()
     }
     
-    /// Start recording
+    /// Start recording (uses internal capture source resolution)
     pub fn start_recording(&mut self) -> anyhow::Result<()> {
         // Determine resolution from whichever capture source is active
         let resolution = if let Some(ref webcam) = self.webcam {
@@ -222,21 +222,26 @@ impl LiveSampler {
                 return Err(anyhow::anyhow!("No capture source initialized"));
             }
         };
-        
-        // Flush stale frames from webcam buffer before starting
-        // This prevents the first recorded frame being from before recording started
-        if let Some(ref mut webcam) = self.webcam {
-            log::debug!("Flushing webcam buffer before recording...");
-            for _ in 0..3 {
-                let _ = webcam.get_frame();
-            }
-        }
-        
+
+        self.start_recording_with_resolution(resolution)
+    }
+
+    /// Start recording with externally provided resolution (from VideoInputManager)
+    pub fn start_recording_with_resolution(&mut self, resolution: (u32, u32)) -> anyhow::Result<()> {
         *self.state.lock().unwrap() = RecordingState::Recording;
         self.current_recording = Some(Recording::new(resolution, self.fps));
-        
+
         log::info!("Started recording at {:?}", resolution);
         Ok(())
+    }
+
+    /// Add a frame from an external source (VideoInputManager)
+    pub fn add_frame(&mut self, frame: CapturedFrame) {
+        if *self.state.lock().unwrap() == RecordingState::Recording {
+            if let Some(ref mut recording) = self.current_recording {
+                recording.add_frame(frame);
+            }
+        }
     }
     
     /// Stop recording and save to file
