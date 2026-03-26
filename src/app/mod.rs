@@ -852,12 +852,11 @@ impl App {
                 crate::ui::windows::main::UICommand::LoadPreset(name) => {
                     match self.preset_manager.load_preset(&name) {
                         Ok(data) => {
-                            // Get list of samples to load with their in/out points
-                            let samples_with_points: Vec<(usize, String, u32, u32)> = data.pads.iter()
-                                .filter_map(|pad| {
-                                    pad.sample_path.as_ref().map(|path| {
-                                        (pad.index, path.clone(), pad.in_point, pad.out_point)
-                                    })
+                            // Build list of samples to load with their metadata
+                            // Respects the has_sample flag for explicit "empty pad" vs "missing file"
+                            let samples_to_load: Vec<(usize, Option<String>, u32, u32, Option<bool>)> = data.pads.iter()
+                                .map(|pad| {
+                                    (pad.index, pad.sample_path.clone(), pad.in_point, pad.out_point, pad.has_sample)
                                 })
                                 .collect();
                             
@@ -868,31 +867,49 @@ impl App {
                             
                             // Load samples that exist and apply in/out points
                             if let (Some(device), Some(queue)) = (&self.wgpu_device, &self.wgpu_queue) {
-                                for (pad_index, sample_path, in_point, out_point) in samples_with_points {
-                                    let path = PathBuf::from(&sample_path);
-                                    if path.exists() {
-                                        match crate::sampler::sample::VideoSample::from_hap(&path, device, queue) {
-                                            Ok(mut sample) => {
-                                                // Apply in/out points from preset
-                                                sample.in_point = in_point.min(sample.frame_count.saturating_sub(1));
-                                                sample.out_point = out_point.min(sample.frame_count);
-                                                if sample.out_point <= sample.in_point {
-                                                    sample.out_point = sample.frame_count;
+                                for (pad_index, sample_path, in_point, out_point, has_sample) in samples_to_load {
+                                    // Handle explicit "no sample" case
+                                    if has_sample == Some(false) {
+                                        let bank = self.bank_manager.current_bank_mut();
+                                        if let Some(pad) = bank.get_pad_mut(pad_index) {
+                                            pad.clear_sample();
+                                            log::debug!("Cleared pad {} as per preset (has_sample=false)", pad_index);
+                                        }
+                                        continue;
+                                    }
+                                    
+                                    // Try to load sample if path is specified
+                                    if let Some(sample_path) = sample_path {
+                                        let path = PathBuf::from(&sample_path);
+                                        if path.exists() {
+                                            match crate::sampler::sample::VideoSample::from_hap(&path, device, queue) {
+                                                Ok(mut sample) => {
+                                                    // Apply in/out points from preset
+                                                    sample.in_point = in_point.min(sample.frame_count.saturating_sub(1));
+                                                    sample.out_point = out_point.min(sample.frame_count);
+                                                    if sample.out_point <= sample.in_point {
+                                                        sample.out_point = sample.frame_count;
+                                                    }
+                                                    log::info!("Applied in={} out={} for pad {}", sample.in_point, sample.out_point, pad_index);
+                                                    
+                                                    let bank = self.bank_manager.current_bank_mut();
+                                                    if let Some(pad) = bank.get_pad_mut(pad_index) {
+                                                        pad.assign_sample(sample);
+                                                        log::info!("Loaded sample for pad {}: {:?}", pad_index, path);
+                                                    }
                                                 }
-                                                log::info!("Applied in={} out={} for pad {}", sample.in_point, sample.out_point, pad_index);
-                                                
-                                                let bank = self.bank_manager.current_bank_mut();
-                                                if let Some(pad) = bank.get_pad_mut(pad_index) {
-                                                    pad.assign_sample(sample);
-                                                    log::info!("Loaded sample for pad {}: {:?}", pad_index, path);
+                                                Err(e) => {
+                                                    log::warn!("Failed to load sample for pad {}: {}", pad_index, e);
                                                 }
                                             }
-                                            Err(e) => {
-                                                log::warn!("Failed to load sample for pad {}: {}", pad_index, e);
+                                        } else {
+                                            // Explicit warning if the preset expected a sample but file is missing
+                                            if has_sample == Some(true) {
+                                                log::warn!("Sample file missing for pad {} (expected at: {:?})", pad_index, path);
+                                            } else {
+                                                log::debug!("Sample path for pad {} not found (skipped): {:?}", pad_index, path);
                                             }
                                         }
-                                    } else {
-                                        log::warn!("Sample not found for pad {}: {:?}", pad_index, path);
                                     }
                                 }
                             }

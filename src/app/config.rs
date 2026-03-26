@@ -21,6 +21,9 @@ pub struct AppConfig {
     /// Encoding settings
     #[serde(default)]
     pub encoding: EncodingConfig,
+    /// Audio analysis settings
+    #[serde(default)]
+    pub audio: AudioConfig,
 }
 
 /// Encoding configuration for HAP video output
@@ -43,6 +46,47 @@ impl Default for EncodingConfig {
             format: HapEncodeFormat::Dxt1,
             gpu_mode: GpuMode::Auto,
             max_dimension: 1920,
+        }
+    }
+}
+
+/// Persisted audio analysis settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioConfig {
+    /// Amplitude / gain multiplier
+    #[serde(default = "default_amplitude")]
+    pub amplitude: f32,
+    /// Smoothing factor (0.0–0.99)
+    #[serde(default = "default_smoothing")]
+    pub smoothing: f32,
+    /// Normalize bands to max
+    #[serde(default = "default_true")]
+    pub normalize: bool,
+    /// Pink noise (+3 dB/octave) compensation
+    #[serde(default)]
+    pub pink_noise: bool,
+    /// FFT window size
+    #[serde(default = "default_fft_size")]
+    pub fft_size: usize,
+    /// Preferred audio input device (None = system default)
+    #[serde(default)]
+    pub device: Option<String>,
+}
+
+fn default_amplitude() -> f32 { 1.0 }
+fn default_smoothing() -> f32 { 0.5 }
+fn default_true() -> bool { true }
+fn default_fft_size() -> usize { crate::audio::fft::DEFAULT_FFT_SIZE }
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            amplitude: 1.0,
+            smoothing: 0.5,
+            normalize: true,
+            pink_noise: false,
+            fft_size: crate::audio::fft::DEFAULT_FFT_SIZE,
+            device: None,
         }
     }
 }
@@ -94,6 +138,7 @@ impl Default for AppConfig {
             target_fps: 60,
             vsync: true,
             encoding: EncodingConfig::default(),
+            audio: AudioConfig::default(),
         }
     }
 }

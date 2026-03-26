@@ -1,5 +1,6 @@
 //! Audio analysis and routing window
 
+use crate::audio::fft::{FFT_SIZES, FFT_SIZE_LABELS};
 use crate::audio::routing::{FftBand, ModulationTarget, RoutingMatrix};
 use crate::audio::AudioAnalyzer;
 use imgui::Ui;
@@ -21,10 +22,18 @@ pub struct AudioWindow {
     selected_target: usize,
     /// Show routing matrix sub-window
     show_routing: bool,
+    /// Selected FFT size index in the dropdown
+    selected_fft_size: usize,
 }
 
 impl AudioWindow {
     pub fn new() -> Self {
+        // Default FFT size index (4096 is index 2)
+        let default_fft_idx = FFT_SIZES
+            .iter()
+            .position(|&s| s == crate::audio::fft::DEFAULT_FFT_SIZE)
+            .unwrap_or(2);
+
         Self {
             audio_devices: Vec::new(),
             selected_device: 0,
@@ -32,9 +41,17 @@ impl AudioWindow {
             tap_times: Vec::new(),
             last_tap_time: 0.0,
             tap_tempo_info: String::new(),
-            selected_band: 1,  // Bass
+            selected_band: 1, // Bass
             selected_target: 0,
             show_routing: false,
+            selected_fft_size: default_fft_idx,
+        }
+    }
+
+    /// Sync the FFT size dropdown to match the analyzer's current size
+    pub fn sync_fft_size(&mut self, analyzer: &AudioAnalyzer) {
+        if let Some(idx) = FFT_SIZES.iter().position(|&s| s == analyzer.fft_size()) {
+            self.selected_fft_size = idx;
         }
     }
 
@@ -88,8 +105,8 @@ impl AudioWindow {
             if ui.button("Start") {
                 let device_name = self.audio_devices.get(self.selected_device).cloned();
                 match analyzer.start_with_device(device_name.as_deref()) {
-                    Ok(()) => {
-                        self.active_device = device_name;
+                    Ok(actual_name) => {
+                        self.active_device = Some(actual_name);
                     }
                     Err(e) => log::error!("Failed to start audio: {}", e),
                 }
@@ -109,12 +126,8 @@ impl AudioWindow {
         }
     }
 
-    fn draw_controls(&self, ui: &Ui, analyzer: &AudioAnalyzer) {
+    fn draw_controls(&mut self, ui: &Ui, analyzer: &mut AudioAnalyzer) {
         ui.text("Processing");
-
-        let mut amplitude = analyzer.get_fft().iter().sum::<f32>().max(0.1); // read-back proxy
-        // We'll use direct config values instead
-        let _ = amplitude;
 
         let mut normalize = analyzer.get_normalize();
         if ui.checkbox("Normalize Bands", &mut normalize) {
@@ -129,6 +142,28 @@ impl AudioWindow {
         }
         ui.same_line();
         ui.text_disabled("(Compensates for pink noise)");
+
+        // FFT size dropdown
+        ui.spacing();
+        let labels: Vec<&str> = FFT_SIZE_LABELS.iter().copied().collect();
+        let prev_idx = self.selected_fft_size;
+        ui.combo_simple_string("FFT Size", &mut self.selected_fft_size, &labels);
+        if self.selected_fft_size != prev_idx {
+            if let Some(&new_size) = FFT_SIZES.get(self.selected_fft_size) {
+                analyzer.set_fft_size(new_size);
+                // Restart stream if running so the new FFT size takes effect
+                if analyzer.is_running() {
+                    let device_name = self.active_device.clone();
+                    match analyzer.start_with_device(device_name.as_deref()) {
+                        Ok(actual_name) => {
+                            self.active_device = Some(actual_name);
+                            log::info!("Restarted audio with FFT size {}", new_size);
+                        }
+                        Err(e) => log::error!("Failed to restart audio with new FFT size: {}", e),
+                    }
+                }
+            }
+        }
     }
 
     fn draw_tempo_section(&mut self, ui: &Ui, bpm: &mut f32) {
@@ -154,12 +189,12 @@ impl AudioWindow {
         let fft = analyzer.get_fft();
         let volume = analyzer.get_volume();
         let band_names = [
-            "Sub", "Bass", "Low", "Mid", "HiMid", "High", "VHigh", "Pres",
+            "Sub Bass", "Bass", "Low Mid", "Mid", "High Mid", "High", "Very High", "Presence",
         ];
 
         for (&value, name) in fft.iter().zip(band_names.iter()) {
             let bar_width = (200.0 * value).min(200.0);
-            ui.text(format!("{:>5}: {:.2}", name, value));
+            ui.text(format!("{:>9}: {:.2}", name, value));
 
             let draw_list = ui.get_window_draw_list();
             let pos = ui.cursor_screen_pos();

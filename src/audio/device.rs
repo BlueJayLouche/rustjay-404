@@ -1,6 +1,6 @@
 //! Audio device enumeration and stream construction.
 
-use crate::audio::fft::{process_audio_frame, AudioConfig, AudioOutput};
+use crate::audio::fft::{AudioConfig, AudioOutput, process_audio_frame};
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use realfft::RealFftPlanner;
@@ -29,17 +29,18 @@ pub fn build_stream_f32(
     config: &cpal::StreamConfig,
     sample_rate: f32,
     channels: usize,
+    fft_size: usize,
     running: Arc<AtomicBool>,
     output: Arc<AudioOutput>,
     audio_config: Arc<AudioConfig>,
     stream_error: Arc<AtomicBool>,
 ) -> anyhow::Result<cpal::Stream> {
-    let fft_size = 1024;
     let mut planner = RealFftPlanner::<f32>::new();
     let r2c = planner.plan_fft_forward(fft_size);
     let mut input_buffer: Vec<f32> = Vec::with_capacity(fft_size * 4);
     let mut scratch = r2c.make_scratch_vec();
 
+    // Pre-allocate all per-frame buffers to avoid heap allocs in the callback.
     let mut windowed_buf: Vec<f32> = vec![0.0; fft_size];
     let mut spectrum_buf: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
     let mut magnitudes_buf: Vec<f32> = vec![0.0; fft_size / 2 + 1];
@@ -49,6 +50,7 @@ pub fn build_stream_f32(
     let mut beat_energy = 0.0f32;
     let mut beat_history: VecDeque<f32> = VecDeque::with_capacity(44);
     let mut beat_counter = 0u32;
+    let mut norm_peak = 0.01f32;
 
     let stream = device.build_input_stream(
         config,
@@ -57,28 +59,17 @@ pub fn build_stream_f32(
                 return;
             }
             mono_buf.clear();
-            mono_buf.extend(
-                data.chunks(channels)
-                    .map(|chunk| chunk.iter().sum::<f32>() / channels as f32),
-            );
+            mono_buf.extend(data.chunks(channels).map(|chunk| chunk.iter().sum::<f32>() / channels as f32));
             input_buffer.extend_from_slice(&mono_buf);
             while input_buffer.len() >= fft_size {
                 frame_buf.clear();
                 frame_buf.extend(input_buffer.drain(..fft_size));
                 process_audio_frame(
-                    &frame_buf,
-                    sample_rate,
-                    fft_size,
-                    &r2c,
-                    &mut scratch,
-                    &mut windowed_buf,
-                    &mut spectrum_buf,
-                    &mut magnitudes_buf,
-                    &mut beat_energy,
-                    &mut beat_history,
-                    &mut beat_counter,
-                    &output,
-                    &audio_config,
+                    &frame_buf, sample_rate, fft_size, &r2c, &mut scratch,
+                    &mut windowed_buf, &mut spectrum_buf, &mut magnitudes_buf,
+                    &mut beat_energy, &mut beat_history, &mut beat_counter,
+                    &mut norm_peak,
+                    &output, &audio_config,
                 );
             }
         },
@@ -97,12 +88,12 @@ pub fn build_stream_i16(
     config: &cpal::StreamConfig,
     sample_rate: f32,
     channels: usize,
+    fft_size: usize,
     running: Arc<AtomicBool>,
     output: Arc<AudioOutput>,
     audio_config: Arc<AudioConfig>,
     stream_error: Arc<AtomicBool>,
 ) -> anyhow::Result<cpal::Stream> {
-    let fft_size = 1024;
     let mut planner = RealFftPlanner::<f32>::new();
     let r2c = planner.plan_fft_forward(fft_size);
     let mut input_buffer: Vec<f32> = Vec::with_capacity(fft_size * 4);
@@ -117,6 +108,7 @@ pub fn build_stream_i16(
     let mut beat_energy = 0.0f32;
     let mut beat_history: VecDeque<f32> = VecDeque::with_capacity(44);
     let mut beat_counter = 0u32;
+    let mut norm_peak = 0.01f32;
 
     let stream = device.build_input_stream(
         config,
@@ -134,19 +126,11 @@ pub fn build_stream_i16(
                 frame_buf.clear();
                 frame_buf.extend(input_buffer.drain(..fft_size));
                 process_audio_frame(
-                    &frame_buf,
-                    sample_rate,
-                    fft_size,
-                    &r2c,
-                    &mut scratch,
-                    &mut windowed_buf,
-                    &mut spectrum_buf,
-                    &mut magnitudes_buf,
-                    &mut beat_energy,
-                    &mut beat_history,
-                    &mut beat_counter,
-                    &output,
-                    &audio_config,
+                    &frame_buf, sample_rate, fft_size, &r2c, &mut scratch,
+                    &mut windowed_buf, &mut spectrum_buf, &mut magnitudes_buf,
+                    &mut beat_energy, &mut beat_history, &mut beat_counter,
+                    &mut norm_peak,
+                    &output, &audio_config,
                 );
             }
         },
@@ -165,12 +149,12 @@ pub fn build_stream_u16(
     config: &cpal::StreamConfig,
     sample_rate: f32,
     channels: usize,
+    fft_size: usize,
     running: Arc<AtomicBool>,
     output: Arc<AudioOutput>,
     audio_config: Arc<AudioConfig>,
     stream_error: Arc<AtomicBool>,
 ) -> anyhow::Result<cpal::Stream> {
-    let fft_size = 1024;
     let mut planner = RealFftPlanner::<f32>::new();
     let r2c = planner.plan_fft_forward(fft_size);
     let mut input_buffer: Vec<f32> = Vec::with_capacity(fft_size * 4);
@@ -185,6 +169,7 @@ pub fn build_stream_u16(
     let mut beat_energy = 0.0f32;
     let mut beat_history: VecDeque<f32> = VecDeque::with_capacity(44);
     let mut beat_counter = 0u32;
+    let mut norm_peak = 0.01f32;
 
     let stream = device.build_input_stream(
         config,
@@ -202,19 +187,11 @@ pub fn build_stream_u16(
                 frame_buf.clear();
                 frame_buf.extend(input_buffer.drain(..fft_size));
                 process_audio_frame(
-                    &frame_buf,
-                    sample_rate,
-                    fft_size,
-                    &r2c,
-                    &mut scratch,
-                    &mut windowed_buf,
-                    &mut spectrum_buf,
-                    &mut magnitudes_buf,
-                    &mut beat_energy,
-                    &mut beat_history,
-                    &mut beat_counter,
-                    &output,
-                    &audio_config,
+                    &frame_buf, sample_rate, fft_size, &r2c, &mut scratch,
+                    &mut windowed_buf, &mut spectrum_buf, &mut magnitudes_buf,
+                    &mut beat_energy, &mut beat_history, &mut beat_counter,
+                    &mut norm_peak,
+                    &output, &audio_config,
                 );
             }
         },

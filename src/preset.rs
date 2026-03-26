@@ -4,17 +4,19 @@
 //! Inspired by rustjay_waaaves preset system.
 
 use crate::sampler::bank::{BankManager, SampleBank};
-use crate::sampler::pad::{BlendMode, SamplePad, TriggerMode};
+use crate::sampler::pad::{BlendMode, PadKeyParams, PadMixMode, SamplePad, TriggerMode};
 use crate::sequencer::SequencerEngine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Preset version for migration support
-const PRESET_VERSION: &str = "1.0";
+/// 1.0: Initial format with basic pad and sequencer data
+/// 1.1: Added mix_mode, key_params, base_volume, opacity, and has_sample fields
+const PRESET_VERSION: &str = "1.1";
 
 /// Serializable trigger mode
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PresetTriggerMode {
     #[default]
@@ -43,8 +45,8 @@ impl From<PresetTriggerMode> for TriggerMode {
     }
 }
 
-/// Serializable blend mode
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
+/// Serializable blend mode (legacy - kept for backward compatibility)
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PresetBlendMode {
     #[default]
@@ -79,6 +81,98 @@ impl From<PresetBlendMode> for BlendMode {
     }
 }
 
+/// Serializable mix mode with keying support
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PresetMixMode {
+    #[default]
+    Normal,
+    Add,
+    Multiply,
+    Screen,
+    Overlay,
+    SoftLight,
+    HardLight,
+    Difference,
+    Lighten,
+    Darken,
+    ChromaKey,
+    LumaKey,
+}
+
+impl From<PadMixMode> for PresetMixMode {
+    fn from(mode: PadMixMode) -> Self {
+        match mode {
+            PadMixMode::Normal => PresetMixMode::Normal,
+            PadMixMode::Add => PresetMixMode::Add,
+            PadMixMode::Multiply => PresetMixMode::Multiply,
+            PadMixMode::Screen => PresetMixMode::Screen,
+            PadMixMode::Overlay => PresetMixMode::Overlay,
+            PadMixMode::SoftLight => PresetMixMode::SoftLight,
+            PadMixMode::HardLight => PresetMixMode::HardLight,
+            PadMixMode::Difference => PresetMixMode::Difference,
+            PadMixMode::Lighten => PresetMixMode::Lighten,
+            PadMixMode::Darken => PresetMixMode::Darken,
+            PadMixMode::ChromaKey => PresetMixMode::ChromaKey,
+            PadMixMode::LumaKey => PresetMixMode::LumaKey,
+        }
+    }
+}
+
+impl From<PresetMixMode> for PadMixMode {
+    fn from(mode: PresetMixMode) -> Self {
+        match mode {
+            PresetMixMode::Normal => PadMixMode::Normal,
+            PresetMixMode::Add => PadMixMode::Add,
+            PresetMixMode::Multiply => PadMixMode::Multiply,
+            PresetMixMode::Screen => PadMixMode::Screen,
+            PresetMixMode::Overlay => PadMixMode::Overlay,
+            PresetMixMode::SoftLight => PadMixMode::SoftLight,
+            PresetMixMode::HardLight => PadMixMode::HardLight,
+            PresetMixMode::Difference => PadMixMode::Difference,
+            PresetMixMode::Lighten => PadMixMode::Lighten,
+            PresetMixMode::Darken => PadMixMode::Darken,
+            PresetMixMode::ChromaKey => PadMixMode::ChromaKey,
+            PresetMixMode::LumaKey => PadMixMode::LumaKey,
+        }
+    }
+}
+
+/// Serializable keying parameters
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct PresetKeyParams {
+    /// Key color for chroma key [R, G, B] (0-1)
+    pub key_color: [f32; 3],
+    /// Distance/brightness threshold (0-1)
+    pub threshold: f32,
+    /// Edge smoothness (0-1)
+    pub smoothness: f32,
+    /// Invert the key (for luma key)
+    pub invert: bool,
+}
+
+impl From<PadKeyParams> for PresetKeyParams {
+    fn from(params: PadKeyParams) -> Self {
+        Self {
+            key_color: params.key_color,
+            threshold: params.threshold,
+            smoothness: params.smoothness,
+            invert: params.invert,
+        }
+    }
+}
+
+impl From<PresetKeyParams> for PadKeyParams {
+    fn from(params: PresetKeyParams) -> Self {
+        Self {
+            key_color: params.key_color,
+            threshold: params.threshold,
+            smoothness: params.smoothness,
+            invert: params.invert,
+        }
+    }
+}
+
 /// Pad data for serialization
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PresetPadData {
@@ -88,10 +182,31 @@ pub struct PresetPadData {
     pub trigger_mode: PresetTriggerMode,
     pub loop_enabled: bool,
     pub speed: f32,
+    /// User-set base speed (before LFO/audio modulation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_speed: Option<f32>,
+    /// Current volume (effective, after modulation)
     pub volume: f32,
-    pub blend_mode: PresetBlendMode,
+    /// User-set base volume (before LFO/audio modulation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_volume: Option<f32>,
+    /// Legacy blend mode (kept for backward compatibility)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blend_mode: Option<PresetBlendMode>,
+    /// Mix mode with keying support (preferred over blend_mode)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mix_mode: Option<PresetMixMode>,
+    /// Keying parameters for chroma/luma key
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_params: Option<PresetKeyParams>,
+    /// Opacity (0.0 - 1.0), alternative to volume for mixing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f32>,
     pub midi_note: Option<u8>,
     pub sample_path: Option<String>,
+    /// Whether this pad should have a sample loaded (explicit "empty" vs "missing file")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_sample: Option<bool>,
     pub in_point: u32,
     pub out_point: u32,
 }
@@ -115,10 +230,16 @@ impl From<&SamplePad> for PresetPadData {
             trigger_mode: pad.trigger_mode.into(),
             loop_enabled: pad.loop_enabled,
             speed: pad.speed,
+            base_speed: Some(pad.base_speed),
             volume: pad.volume,
-            blend_mode: pad.blend_mode.into(),
+            base_volume: Some(pad.base_volume),
+            blend_mode: Some(pad.blend_mode.into()),
+            mix_mode: Some(pad.mix_mode.into()),
+            key_params: Some(pad.key_params.into()),
+            opacity: Some(pad.volume), // Use volume as opacity for mixing
             midi_note: pad.midi_note,
             sample_path: sample_info.as_ref().map(|(p, _, _)| p.clone()),
+            has_sample: Some(pad.sample.is_some()),
             in_point: sample_info.as_ref().map(|(_, i, _)| *i).unwrap_or(0),
             out_point: sample_info.map(|(_, _, o)| o).unwrap_or(0),
         }
@@ -236,10 +357,45 @@ impl PresetData {
                 pad.color = pad_data.color;
                 pad.trigger_mode = pad_data.trigger_mode.into();
                 pad.loop_enabled = pad_data.loop_enabled;
-                pad.speed = pad_data.speed.clamp(-5.0, 5.0);
-                pad.volume = pad_data.volume.clamp(0.0, 1.0);
-                pad.blend_mode = pad_data.blend_mode.into();
+                
+                // Speed: prefer base_speed if available, fall back to speed
+                let speed = pad_data.base_speed.unwrap_or(pad_data.speed);
+                pad.speed = speed.clamp(-5.0, 5.0);
+                pad.base_speed = speed.clamp(-5.0, 5.0);
+                
+                // Volume: prefer base_volume if available, fall back to volume
+                let volume = pad_data.base_volume.unwrap_or(pad_data.volume);
+                pad.volume = volume.clamp(0.0, 1.0);
+                pad.base_volume = volume.clamp(0.0, 1.0);
+                
+                // Mix mode: prefer mix_mode if available, fall back to blend_mode mapping
+                if let Some(mix_mode) = pad_data.mix_mode {
+                    pad.mix_mode = mix_mode.into();
+                } else if let Some(blend_mode) = pad_data.blend_mode {
+                    // Map legacy blend_mode to mix_mode
+                    pad.mix_mode = match blend_mode {
+                        PresetBlendMode::Replace => PadMixMode::Normal,
+                        PresetBlendMode::Add => PadMixMode::Add,
+                        PresetBlendMode::Multiply => PadMixMode::Multiply,
+                        PresetBlendMode::Screen => PadMixMode::Screen,
+                        PresetBlendMode::Alpha => PadMixMode::Normal,
+                    };
+                }
+                
+                // Legacy blend_mode is kept in sync
+                pad.blend_mode = pad_data.blend_mode.map(|b| b.into()).unwrap_or_default();
+                
+                // Keying parameters
+                if let Some(key_params) = pad_data.key_params {
+                    pad.key_params = key_params.into();
+                }
+                
                 pad.midi_note = pad_data.midi_note;
+                
+                // Clear sample if preset explicitly says this pad should be empty
+                if pad_data.has_sample == Some(false) {
+                    pad.clear_sample();
+                }
                 // Note: Samples are loaded separately via load_preset_samples
             }
         }
@@ -655,5 +811,127 @@ mod tests {
         assert_eq!(PresetManager::clean_display_name("test.json"), "test");
         assert_eq!(PresetManager::clean_display_name("001_test.json"), "test");
         assert_eq!(PresetManager::clean_display_name("my_preset.json"), "my_preset");
+    }
+    
+    #[test]
+    fn test_mix_mode_roundtrip() {
+        // Test all mix modes convert correctly
+        let modes = vec![
+            PadMixMode::Normal,
+            PadMixMode::Add,
+            PadMixMode::Multiply,
+            PadMixMode::Screen,
+            PadMixMode::Overlay,
+            PadMixMode::SoftLight,
+            PadMixMode::HardLight,
+            PadMixMode::Difference,
+            PadMixMode::Lighten,
+            PadMixMode::Darken,
+            PadMixMode::ChromaKey,
+            PadMixMode::LumaKey,
+        ];
+        
+        for mode in modes {
+            let preset_mode: PresetMixMode = mode.into();
+            let back: PadMixMode = preset_mode.into();
+            assert_eq!(mode, back, "Mix mode {:?} failed roundtrip", mode);
+        }
+    }
+    
+    #[test]
+    fn test_key_params_roundtrip() {
+        let original = PadKeyParams {
+            key_color: [0.1, 0.2, 0.3],
+            threshold: 0.5,
+            smoothness: 0.25,
+            invert: true,
+        };
+        
+        let preset: PresetKeyParams = original.into();
+        let back: PadKeyParams = preset.into();
+        
+        assert_eq!(original.key_color, back.key_color);
+        assert_eq!(original.threshold, back.threshold);
+        assert_eq!(original.smoothness, back.smoothness);
+        assert_eq!(original.invert, back.invert);
+    }
+    
+    #[test]
+    fn test_preset_pad_data_serialization() {
+        // Create a pad with all settings
+        let mut pad = SamplePad::new(0);
+        pad.name = "Test Pad".to_string();
+        pad.color = [100, 150, 200];
+        pad.trigger_mode = TriggerMode::Latch;
+        pad.loop_enabled = true;
+        pad.speed = 1.5;
+        pad.base_speed = 1.5;
+        pad.volume = 0.75;
+        pad.base_volume = 0.8;
+        pad.mix_mode = PadMixMode::ChromaKey;
+        pad.key_params = PadKeyParams {
+            key_color: [0.0, 1.0, 0.0],
+            threshold: 0.3,
+            smoothness: 0.1,
+            invert: false,
+        };
+        pad.midi_note = Some(60);
+        
+        // Convert to preset data
+        let preset_data: PresetPadData = (&pad).into();
+        
+        // Verify all fields
+        assert_eq!(preset_data.index, 0);
+        assert_eq!(preset_data.name, "Test Pad");
+        assert_eq!(preset_data.color, [100, 150, 200]);
+        assert_eq!(preset_data.trigger_mode, PresetTriggerMode::Latch);
+        assert_eq!(preset_data.loop_enabled, true);
+        assert_eq!(preset_data.speed, 1.5);
+        assert_eq!(preset_data.base_speed, Some(1.5));
+        assert_eq!(preset_data.volume, 0.75);
+        assert_eq!(preset_data.base_volume, Some(0.8));
+        assert_eq!(preset_data.opacity, Some(0.75));
+        assert_eq!(preset_data.mix_mode, Some(PresetMixMode::ChromaKey));
+        assert!(preset_data.key_params.is_some());
+        assert_eq!(preset_data.has_sample, Some(false)); // No sample assigned
+        
+        // Test JSON serialization
+        let json = serde_json::to_string_pretty(&preset_data).unwrap();
+        assert!(json.contains("mix_mode"));
+        assert!(json.contains("chroma_key"));
+        assert!(json.contains("key_params"));
+        assert!(json.contains("base_volume"));
+        assert!(json.contains("base_speed"));
+        
+        // Test deserialization
+        let deserialized: PresetPadData = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.mix_mode, Some(PresetMixMode::ChromaKey));
+        assert_eq!(deserialized.base_volume, Some(0.8));
+        assert_eq!(deserialized.base_speed, Some(1.5));
+    }
+    
+    #[test]
+    fn test_backward_compatibility_blend_mode() {
+        // Test that old presets with only blend_mode still work
+        let old_preset_json = r#"
+        {
+            "index": 0,
+            "name": "Old Pad",
+            "color": [255, 100, 100],
+            "trigger_mode": "gate",
+            "loop_enabled": false,
+            "speed": 1.0,
+            "volume": 0.5,
+            "blend_mode": "add",
+            "midi_note": null,
+            "sample_path": null,
+            "in_point": 0,
+            "out_point": 0
+        }
+        "#;
+        
+        let data: PresetPadData = serde_json::from_str(old_preset_json).unwrap();
+        assert_eq!(data.blend_mode, Some(PresetBlendMode::Add));
+        assert!(data.mix_mode.is_none()); // New field not present in old preset
     }
 }
