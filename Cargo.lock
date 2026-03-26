@@ -1262,6 +1262,7 @@ dependencies = [
 [[package]]
 name = "hap-parser"
 version = "0.1.0"
+source = "git+https://github.com/BlueJayLouche/hap-rs#0727f00b53d32eb9f048bb1fc4d5ac718f017056"
 dependencies = [
  "byteorder",
  "snap",
@@ -1271,6 +1272,7 @@ dependencies = [
 [[package]]
 name = "hap-qt"
 version = "0.1.0"
+source = "git+https://github.com/BlueJayLouche/hap-rs#0727f00b53d32eb9f048bb1fc4d5ac718f017056"
 dependencies = [
  "byteorder",
  "hap-parser",
@@ -1283,6 +1285,7 @@ dependencies = [
 [[package]]
 name = "hap-wgpu"
 version = "0.1.0"
+source = "git+https://github.com/BlueJayLouche/hap-rs#0727f00b53d32eb9f048bb1fc4d5ac718f017056"
 dependencies = [
  "bytemuck",
  "hap-parser",
@@ -3272,6 +3275,7 @@ dependencies = [
 [[package]]
 name = "syphon-core"
 version = "0.1.0"
+source = "git+https://github.com/BlueJayLouche/syphon-rs#1c6e0ea2e7339b1600c7cd46625c76ba083de9c7"
 dependencies = [
  "block",
  "cocoa 0.25.0",
@@ -3289,6 +3293,7 @@ dependencies = [
 [[package]]
 name = "syphon-metal"
 version = "0.1.0"
+source = "git+https://github.com/BlueJayLouche/syphon-rs#1c6e0ea2e7339b1600c7cd46625c76ba083de9c7"
 dependencies = [
  "cocoa 0.25.0",
  "core-foundation 0.9.4",
@@ -3306,6 +3311,7 @@ dependencies = [
 [[package]]
 name = "syphon-wgpu"
 version = "0.1.0"
+source = "git+https://github.com/BlueJayLouche/syphon-rs#1c6e0ea2e7339b1600c7cd46625c76ba083de9c7"
 dependencies = [
  "bytemuck",
  "cocoa 0.25.0",

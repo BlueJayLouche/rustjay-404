@@ -41,8 +41,8 @@ toml = "0.8"
 # Video
 glob = "0.3"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
-hap-wgpu = { path = "../hap-rs/hap-wgpu" }
-hap-qt = { path = "../hap-rs/hap-qt" }
+hap-wgpu = { git = "https://github.com/BlueJayLouche/hap-rs" }
+hap-qt = { git = "https://github.com/BlueJayLouche/hap-rs" }
 
 # Native video decoding (no ffmpeg required)
 mp4 = "0.14"
@@ -84,8 +84,8 @@ rfd = "0.17.2"
 
 # Platform-specific dependencies for inter-app video
 [target.'cfg(target_os = "macos")'.dependencies]
-syphon-core = { path = "../syphon-rs/syphon-core" }
-syphon-wgpu = { path = "../syphon-rs/syphon-wgpu" }
+syphon-core = { git = "https://github.com/BlueJayLouche/syphon-rs", package = "syphon-core" }
+syphon-wgpu = { git = "https://github.com/BlueJayLouche/syphon-rs", package = "syphon-wgpu" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # windows = { version = "0.52", features = ["Win32_Graphics_Direct3D11"] }
