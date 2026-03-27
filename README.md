@@ -113,6 +113,21 @@ Working implementation with:
 
 See [ROADMAP.md](ROADMAP.md) for future plans.
 
+## Install
+
+Pre-built binaries are available on the [Releases](https://github.com/BlueJayLouche/rustjay-404/releases) page.
+
+| Platform | Format | Notes |
+|----------|--------|-------|
+| macOS Apple Silicon | `.dmg` | Ad-hoc signed. Right-click → Open on first launch. |
+| macOS Intel | `.dmg` | Ad-hoc signed. Right-click → Open on first launch. |
+| Linux x86_64 | `.tar.gz` | Requires Vulkan-capable GPU. |
+| Windows x86_64 | `.zip` | Extract and run. |
+
+On macOS, download the `.dmg`, open it, and drag RustJay 404 to your Applications folder.
+
+> NDI is not included in release builds. For NDI support, install the NDI SDK and build from source.
+
 ## Dependencies
 
 ### FFmpeg with Snappy (required for HAP encoding/conversion)
@@ -138,22 +153,12 @@ ffmpeg -codecs 2>&1 | grep -i hap
 
 ### Syphon (macOS Only)
 
-RustJay 404 can receive video via Syphon input on macOS. The framework is included via the `syphon-rs` sibling repo.
+RustJay 404 can receive and send video via Syphon on macOS. The framework is provided by [`syphon-rs`](https://github.com/BlueJayLouche/syphon-rs), fetched automatically via Cargo. The build script finds `Syphon.framework` from the cargo git cache, a sibling `syphon-rs/` checkout, or the `SYPHON_FRAMEWORK_DIR` environment variable.
 
-**Requirements:** The `syphon-rs` repo must be present as a sibling directory:
-```
-developer/rust/
-├── syphon-rs/          ← must exist
-├── hap-rs/             ← must also exist
-└── rustjay-404/
-```
-
-If your layout differs:
+If you see `dyld: Library not loaded: Syphon.framework` at runtime:
 ```bash
 SYPHON_FRAMEWORK_DIR=/path/to/syphon-rs/syphon-lib cargo build --release
 ```
-
-If you see `dyld: Library not loaded: Syphon.framework` at runtime, verify the framework exists at `../syphon-rs/syphon-lib/Syphon.framework`.
 
 ### NDI (Network Device Interface)
 
@@ -170,16 +175,22 @@ cargo build --release --no-default-features
 
 ### HAP Playback (`hap-rs`)
 
-HAP video decoding uses the local `hap-rs` sibling repo (path dependency). No additional installation is required — it builds automatically with the project.
+HAP video decoding uses the [`hap-rs`](https://github.com/BlueJayLouche/hap-rs) crate (fetched automatically via Cargo). No additional installation is required.
 
 For encoding your source videos to HAP format, see the FFmpeg section above.
 
-### Building
+### Building from Source
 
 Requires Rust 1.70+ and a GPU with BC texture compression support.
 
 ```bash
 cargo build --release
+```
+
+To build without NDI:
+
+```bash
+cargo build --release --no-default-features
 ```
 
 ## License
