@@ -620,9 +620,9 @@ impl App {
                     }
                 }
             }
-            WindowEvent::RedrawRequested => {
-                let _ = self.render_output();
-            }
+            // Note: Rendering is now done in about_to_wait() to ensure
+            // continuous output even when the window is not focused.
+            // Windows throttles RedrawRequested events for unfocused windows.
             _ => {}
         }
     }
@@ -696,9 +696,8 @@ impl App {
                     ctx.imgui.resize(size.width, size.height, 1.0);
                 }
             }
-            WindowEvent::RedrawRequested => {
-                let _ = self.render_control();
-            }
+            // Note: Control window rendering is now done in about_to_wait()
+            // to ensure continuous UI updates regardless of focus.
             _ => {}
         }
     }
@@ -1471,13 +1470,13 @@ impl winit::application::ApplicationHandler for App {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         // Update application state
         self.update();
-        
-        // Request redraws for both windows
-        if let Some(ref window) = self.output_window {
-            window.request_redraw();
-        }
-        if let Some(ref window) = self.control_window {
-            window.request_redraw();
-        }
+
+        // Render output directly here instead of relying on RedrawRequested.
+        // Windows throttles RedrawRequested events when the window isn't focused,
+        // which causes the output to freeze/go black when clicking on other windows.
+        let _ = self.render_output();
+
+        // Render control window
+        let _ = self.render_control();
     }
 }

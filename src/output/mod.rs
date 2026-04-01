@@ -10,6 +10,8 @@
 
 #[cfg(target_os = "macos")]
 use crate::video::interapp::SyphonOutput;
+#[cfg(target_os = "windows")]
+use crate::video::interapp::SpoutOutput;
 
 #[cfg(feature = "ndi")]
 pub mod ndi_output;
@@ -24,6 +26,10 @@ pub enum OutputCommand {
     StartSyphon,
     #[cfg(target_os = "macos")]
     StopSyphon,
+    #[cfg(target_os = "windows")]
+    StartSpout { sender_name: String },
+    #[cfg(target_os = "windows")]
+    StopSpout,
     #[cfg(feature = "ndi")]
     StartNdi,
     #[cfg(feature = "ndi")]
@@ -202,6 +208,10 @@ pub struct OutputManager {
     #[cfg(target_os = "macos")]
     syphon_output: Option<SyphonOutput>,
 
+    /// Spout output (Windows) — CPU-path via readback pool
+    #[cfg(target_os = "windows")]
+    spout_output: Option<SpoutOutput>,
+
     /// NDI network output (CPU-path via readback pool)
     #[cfg(feature = "ndi")]
     ndi_output: Option<NdiOutputSender>,
@@ -217,6 +227,8 @@ impl OutputManager {
         Self {
             #[cfg(target_os = "macos")]
             syphon_output: None,
+            #[cfg(target_os = "windows")]
+            spout_output: None,
             #[cfg(feature = "ndi")]
             ndi_output: None,
             readback_pool: ReadbackPool::new(),
@@ -278,6 +290,33 @@ impl OutputManager {
             .map_or(false, |s| s.is_zero_copy())
     }
 
+    // --- Spout (Windows) ---
+
+    #[cfg(target_os = "windows")]
+    pub fn start_spout(&mut self, sender_name: &str) -> anyhow::Result<()> {
+        let spout = SpoutOutput::new(sender_name)?;
+        self.spout_output = Some(spout);
+        log::info!("Spout output started: {}", sender_name);
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn stop_spout(&mut self) {
+        if self.spout_output.take().is_some() {
+            log::info!("Spout output stopped");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn is_spout_active(&self) -> bool {
+        self.spout_output.is_some()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn is_spout_active(&self) -> bool {
+        false
+    }
+
     // --- NDI ---
 
     #[cfg(feature = "ndi")]
@@ -327,10 +366,14 @@ impl OutputManager {
 
     // --- Readback pool queries ---
 
-    /// Returns true if any CPU-path output (NDI, V4L2) needs readback.
+    /// Returns true if any CPU-path output (NDI, Spout, V4L2) needs readback.
     fn needs_readback(&self) -> bool {
         #[cfg(feature = "ndi")]
         if self.ndi_output.is_some() {
+            return true;
+        }
+        #[cfg(target_os = "windows")]
+        if self.spout_output.is_some() {
             return true;
         }
         false
@@ -360,6 +403,13 @@ impl OutputManager {
                 if let Some(ref sender) = self.ndi_output {
                     sender.submit_frame(&data, width, height);
                 }
+
+                #[cfg(target_os = "windows")]
+                if let Some(ref mut spout) = self.spout_output {
+                    if let Err(e) = spout.submit_bytes(&data, width, height) {
+                        log::error!("Spout output error: {}", e);
+                    }
+                }
             }
 
             self.readback_pool.submit_copy(texture, device, queue);
@@ -378,6 +428,8 @@ impl OutputManager {
         self.stop_ndi();
         #[cfg(target_os = "macos")]
         self.stop_syphon();
+        #[cfg(target_os = "windows")]
+        self.stop_spout();
     }
 
     /// Drain readback pool (call when GPU device is still alive).

@@ -88,7 +88,17 @@ syphon-core = { git = "https://github.com/BlueJayLouche/syphon-rs", package = "s
 syphon-wgpu = { git = "https://github.com/BlueJayLouche/syphon-rs", package = "syphon-wgpu" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# windows = { version = "0.52", features = ["Win32_Graphics_Direct3D11"] }
+# Spout (Windows GPU texture sharing) — implemented via windows crate D3D11 directly
+windows = { version = "0.61", features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Foundation",
+    "Win32_System_Memory",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # v4l2 = "0.1"
@@ -98,7 +108,7 @@ syphon-wgpu = { git = "https://github.com/BlueJayLouche/syphon-rs", package = "s
 # optional = true
 
 [features]
-default = ["ndi"]
+default = []
 ndi = ["grafton-ndi"]
 
 [[bin]]
