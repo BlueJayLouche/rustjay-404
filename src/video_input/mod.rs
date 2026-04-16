@@ -409,12 +409,27 @@ impl VideoInputManager {
     }
 
     /// Start V4L2 capture input (Linux only, stops current input first).
+    ///
+    /// Uses nokhwa's `input-native` backend which maps to V4L2 on Linux.
+    /// `path` is a device path such as `"/dev/video0"`.
     #[cfg(target_os = "linux")]
     pub fn start_v4l2(&mut self, path: &str) -> anyhow::Result<()> {
         self.stop();
         log::info!("[VideoInput] Starting V4L2 capture from '{}'", path);
-        // V4L2 capture is handled via nokhwa's native backend; stub for now.
-        Err(anyhow::anyhow!("V4L2 capture not yet implemented for path '{}'", path))
+
+        let mut cam = crate::video::capture::webcam::WebcamCapture::new();
+        cam.start_by_path(path)?;
+        self.resolution = cam.resolution();
+        self.webcam = Some(cam);
+        self.input_type = InputType::Webcam; // reuse webcam frame-polling path
+        self.active = true;
+
+        log::info!(
+            "[VideoInput] V4L2 capture started at {}x{}",
+            self.resolution.0,
+            self.resolution.1
+        );
+        Ok(())
     }
 
     /// Returns true if the NDI source was lost

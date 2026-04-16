@@ -101,7 +101,8 @@ windows = { version = "0.61", features = [
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# v4l2 = "0.1"
+# V4L2 loopback output (virtual webcam via v4l2loopback kernel module)
+v4l = "0.14"
 
 # [dependencies.ffmpeg-next]
 # version = "6.1"

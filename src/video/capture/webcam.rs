@@ -70,6 +70,20 @@ impl WebcamCapture {
         Ok(())
     }
     
+    /// Initialize and start capture from a device path (e.g. `/dev/video0`).
+    /// Used on Linux for V4L2 capture devices.
+    pub fn start_by_path(&mut self, device_path: &str) -> anyhow::Result<()> {
+        let requested =
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+        let index = CameraIndex::String(device_path.to_string());
+        let mut camera = Camera::new(index, requested)?;
+        camera.open_stream()?;
+        let actual_res = camera.resolution();
+        self.resolution = (actual_res.width(), actual_res.height());
+        self.camera = Some(camera);
+        Ok(())
+    }
+
     /// Get the current/latest frame
     pub fn get_frame(&mut self) -> Option<CapturedFrame> {
         if let Some(ref mut camera) = self.camera {

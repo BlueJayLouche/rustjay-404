@@ -18,6 +18,11 @@ pub mod ndi_output;
 #[cfg(feature = "ndi")]
 use ndi_output::NdiOutputSender;
 
+#[cfg(target_os = "linux")]
+mod v4l2_output;
+#[cfg(target_os = "linux")]
+use v4l2_output::V4l2LoopbackOutput;
+
 /// Commands for output stream control
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputCommand {
@@ -216,6 +221,10 @@ pub struct OutputManager {
     #[cfg(feature = "ndi")]
     ndi_output: Option<NdiOutputSender>,
 
+    /// V4L2 loopback output (Linux, CPU-path via readback pool)
+    #[cfg(target_os = "linux")]
+    v4l2_output: Option<V4l2LoopbackOutput>,
+
     /// Async readback pool for CPU-path outputs (NDI, V4L2).
     readback_pool: ReadbackPool,
 
@@ -231,6 +240,8 @@ impl OutputManager {
             spout_output: None,
             #[cfg(feature = "ndi")]
             ndi_output: None,
+            #[cfg(target_os = "linux")]
+            v4l2_output: None,
             readback_pool: ReadbackPool::new(),
             frame_count: 0,
         }
@@ -366,23 +377,25 @@ impl OutputManager {
 
     // --- V4L2 loopback output (Linux) ---
 
-    /// Start V4L2 loopback output (Linux only, stub until fully implemented).
     #[cfg(target_os = "linux")]
-    pub fn start_v4l2(&mut self, path: &str, _width: u32, _height: u32) -> anyhow::Result<()> {
-        log::info!("V4L2 loopback output requested on '{}' (not yet implemented)", path);
-        Err(anyhow::anyhow!("V4L2 loopback output not yet implemented for path '{}'", path))
+    pub fn start_v4l2(&mut self, path: &str, width: u32, height: u32) -> anyhow::Result<()> {
+        self.v4l2_output = None; // stop any existing instance
+        let output = V4l2LoopbackOutput::new(path, width, height)?;
+        log::info!("[V4L2] Loopback output started: {} ({}x{})", path, width, height);
+        self.v4l2_output = Some(output);
+        Ok(())
     }
 
-    /// Stop V4L2 loopback output (Linux only).
     #[cfg(target_os = "linux")]
     pub fn stop_v4l2(&mut self) {
-        log::info!("V4L2 loopback output stopped (was not active)");
+        if self.v4l2_output.take().is_some() {
+            log::info!("[V4L2] Loopback output stopped");
+        }
     }
 
-    /// Returns true if a V4L2 loopback output is currently active.
     #[cfg(target_os = "linux")]
     pub fn is_v4l2_active(&self) -> bool {
-        false
+        self.v4l2_output.is_some()
     }
 
     // --- Readback pool queries ---
@@ -395,6 +408,10 @@ impl OutputManager {
         }
         #[cfg(target_os = "windows")]
         if self.spout_output.is_some() {
+            return true;
+        }
+        #[cfg(target_os = "linux")]
+        if self.v4l2_output.is_some() {
             return true;
         }
         false
@@ -431,6 +448,13 @@ impl OutputManager {
                         log::error!("Spout output error: {}", e);
                     }
                 }
+
+                #[cfg(target_os = "linux")]
+                if let Some(ref mut v4l2) = self.v4l2_output {
+                    if let Err(e) = v4l2.send_frame(&data) {
+                        log::error!("[V4L2] Frame send error: {}", e);
+                    }
+                }
             }
 
             self.readback_pool.submit_copy(texture, device, queue);
@@ -451,6 +475,8 @@ impl OutputManager {
         self.stop_syphon();
         #[cfg(target_os = "windows")]
         self.stop_spout();
+        #[cfg(target_os = "linux")]
+        self.stop_v4l2();
     }
 
     /// Drain readback pool (call when GPU device is still alive).
