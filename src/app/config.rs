@@ -24,7 +24,27 @@ pub struct AppConfig {
     /// Audio analysis settings
     #[serde(default)]
     pub audio: AudioConfig,
+    /// OSC receive port
+    #[serde(default = "default_osc_port")]
+    pub osc_port: u16,
+    /// Syphon output sender name (macOS)
+    #[cfg(target_os = "macos")]
+    #[serde(default = "default_output_name")]
+    pub syphon_output_name: String,
+    /// NDI output stream name
+    #[cfg(feature = "ndi")]
+    #[serde(default = "default_output_name")]
+    pub ndi_output_name: String,
+    /// V4L2 loopback output device path (Linux)
+    #[cfg(target_os = "linux")]
+    #[serde(default = "default_v4l2_path")]
+    pub v4l2_output_path: String,
 }
+
+fn default_osc_port() -> u16 { 8000 }
+fn default_output_name() -> String { "Rusty-404".to_string() }
+#[cfg(target_os = "linux")]
+fn default_v4l2_path() -> String { "/dev/video11".to_string() }
 
 /// Encoding configuration for HAP video output
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +159,13 @@ impl Default for AppConfig {
             vsync: true,
             encoding: EncodingConfig::default(),
             audio: AudioConfig::default(),
+            osc_port: 8000,
+            #[cfg(target_os = "macos")]
+            syphon_output_name: "Rusty-404".to_string(),
+            #[cfg(feature = "ndi")]
+            ndi_output_name: "Rusty-404".to_string(),
+            #[cfg(target_os = "linux")]
+            v4l2_output_path: "/dev/video11".to_string(),
         }
     }
 }

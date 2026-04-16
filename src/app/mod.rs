@@ -198,6 +198,26 @@ impl App {
         let input_router = InputRouter::new();
         let preset_manager = PresetManager::new();
 
+        // Extract config values needed for video_settings before config is moved into App
+        let vs_osc_port = config.osc_port;
+        #[cfg(target_os = "macos")]
+        let vs_syphon_name = config.syphon_output_name.clone();
+        #[cfg(feature = "ndi")]
+        let vs_ndi_name = config.ndi_output_name.clone();
+        #[cfg(target_os = "linux")]
+        let vs_v4l2_path = config.v4l2_output_path.clone();
+
+        let mut video_settings = VideoSettingsWindow::new();
+        video_settings.init_from_config(
+            vs_osc_port,
+            #[cfg(target_os = "macos")]
+            vs_syphon_name,
+            #[cfg(feature = "ndi")]
+            vs_ndi_name,
+            #[cfg(target_os = "linux")]
+            vs_v4l2_path,
+        );
+
         Ok(Self {
             config,
             rt,
@@ -231,7 +251,7 @@ impl App {
             ui_command_receiver: None,
             input_router,
             preset_manager,
-            video_settings: VideoSettingsWindow::new(),
+            video_settings,
         })
     }
 
@@ -546,6 +566,17 @@ impl App {
     fn handle_output_event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
+                // Sync current UI values back to config before saving
+                self.config.osc_port = self.video_settings.osc_port();
+                #[cfg(target_os = "macos")]
+                { self.config.syphon_output_name = self.video_settings.syphon_output_name().to_string(); }
+                #[cfg(feature = "ndi")]
+                { self.config.ndi_output_name = self.video_settings.ndi_output_name().to_string(); }
+                #[cfg(target_os = "linux")]
+                { self.config.v4l2_output_path = self.video_settings.v4l2_output_path().to_string(); }
+                if let Err(e) = self.config.save() {
+                    log::warn!("Failed to save config on exit: {}", e);
+                }
                 event_loop.exit();
             }
             WindowEvent::CursorEntered { .. } => {
@@ -723,9 +754,10 @@ impl App {
             }
         }
         
-        // Try to start OSC
-        match self.input_router.auto_start_osc() {
-            Ok(port) => {
+        // Try to start OSC on the configured port
+        match self.input_router.start_osc(self.config.osc_port) {
+            Ok(()) => {
+                let port = self.config.osc_port;
                 log::info!("OSC server started on port {}", port);
                 log::info!("OSC addresses:");
                 log::info!("  /rustjay404/trigger <pad>    - Trigger pad (0-15)");
@@ -980,6 +1012,13 @@ impl App {
             {
                 self.video_settings.update_ndi_sources(
                     self.video_input.ndi_sources.clone(),
+                );
+            }
+            #[cfg(target_os = "linux")]
+            {
+                self.video_settings.update_v4l2_devices(
+                    self.video_input.v4l2_capture_devices.clone(),
+                    self.video_input.v4l2_output_devices.clone(),
                 );
             }
         }
@@ -1379,6 +1418,35 @@ impl App {
                 self.output_manager.stop_ndi();
             }
             self.video_settings.set_ndi_output_active(self.output_manager.is_ndi_active());
+        }
+
+        // V4L2 input / loopback output (Linux)
+        #[cfg(target_os = "linux")]
+        {
+            if self.video_settings.take_start_v4l2_requested() {
+                if let Some(path) = self.video_settings.selected_v4l2_capture_path().map(|p| p.to_string()) {
+                    if let Err(e) = self.video_input.start_v4l2(&path) {
+                        log::error!("Failed to start V4L2 input '{}': {}", path, e);
+                        self.video_settings.set_error(Some(format!("{}", e)));
+                    } else {
+                        self.video_settings.set_initializing(false);
+                    }
+                }
+            }
+
+            if self.video_settings.take_start_v4l2_output_requested() {
+                let w = self.config.output_window.width;
+                let h = self.config.output_window.height;
+                let path = self.video_settings.v4l2_output_path().to_string();
+                if let Err(e) = self.output_manager.start_v4l2(&path, w, h) {
+                    log::error!("Failed to start V4L2 output '{}': {}", path, e);
+                    self.video_settings.set_error(Some(format!("{}", e)));
+                }
+            }
+            if self.video_settings.take_stop_v4l2_output_requested() {
+                self.output_manager.stop_v4l2();
+            }
+            self.video_settings.set_v4l2_output_active(self.output_manager.is_v4l2_active());
         }
 
         queue.submit(std::iter::once(encoder.finish()));

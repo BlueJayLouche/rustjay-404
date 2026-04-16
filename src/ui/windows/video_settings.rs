@@ -10,6 +10,8 @@ pub enum InputSourceType {
     Syphon,
     #[cfg(feature = "ndi")]
     Ndi,
+    #[cfg(target_os = "linux")]
+    V4l2,
 }
 
 impl InputSourceType {
@@ -20,6 +22,8 @@ impl InputSourceType {
             InputSourceType::Syphon => "Syphon",
             #[cfg(feature = "ndi")]
             InputSourceType::Ndi => "NDI",
+            #[cfg(target_os = "linux")]
+            InputSourceType::V4l2 => "V4L2",
         }
     }
 }
@@ -94,6 +98,41 @@ pub struct VideoSettingsWindow {
     /// Whether NDI output is currently active (set by app)
     #[cfg(feature = "ndi")]
     ndi_output_active: bool,
+
+    // --- V4L2 (Linux) ---
+    /// V4L2 capture device list (input)
+    #[cfg(target_os = "linux")]
+    v4l2_capture_devices: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
+    /// V4L2 loopback device list (output)
+    #[cfg(target_os = "linux")]
+    v4l2_output_devices: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
+    /// Selected V4L2 capture device index
+    #[cfg(target_os = "linux")]
+    selected_v4l2_capture: i32,
+    /// Selected V4L2 loopback device index
+    #[cfg(target_os = "linux")]
+    selected_v4l2_output: i32,
+    /// V4L2 lists need refresh
+    #[cfg(target_os = "linux")]
+    v4l2_needs_refresh: bool,
+    /// User clicked "Start V4L2 Input"
+    #[cfg(target_os = "linux")]
+    start_v4l2_requested: bool,
+    /// V4L2 loopback output device path (derived from selection)
+    #[cfg(target_os = "linux")]
+    v4l2_output_path: String,
+    /// User requested V4L2 output start
+    #[cfg(target_os = "linux")]
+    start_v4l2_output_requested: bool,
+    /// User requested V4L2 output stop
+    #[cfg(target_os = "linux")]
+    stop_v4l2_output_requested: bool,
+    /// Whether V4L2 output is currently active (set by app)
+    #[cfg(target_os = "linux")]
+    v4l2_output_active: bool,
+
+    /// OSC receive port
+    osc_port: u16,
 }
 
 impl VideoSettingsWindow {
@@ -140,8 +179,54 @@ impl VideoSettingsWindow {
             stop_ndi_output_requested: false,
             #[cfg(feature = "ndi")]
             ndi_output_active: false,
+            #[cfg(target_os = "linux")]
+            v4l2_capture_devices: Vec::new(),
+            #[cfg(target_os = "linux")]
+            v4l2_output_devices: Vec::new(),
+            #[cfg(target_os = "linux")]
+            selected_v4l2_capture: -1,
+            #[cfg(target_os = "linux")]
+            selected_v4l2_output: -1,
+            #[cfg(target_os = "linux")]
+            v4l2_needs_refresh: true,
+            #[cfg(target_os = "linux")]
+            start_v4l2_requested: false,
+            #[cfg(target_os = "linux")]
+            v4l2_output_path: "/dev/video11".to_string(),
+            #[cfg(target_os = "linux")]
+            start_v4l2_output_requested: false,
+            #[cfg(target_os = "linux")]
+            stop_v4l2_output_requested: false,
+            #[cfg(target_os = "linux")]
+            v4l2_output_active: false,
+            osc_port: 8000,
         }
     }
+
+    /// Initialise fields from persisted config values (call immediately after new())
+    pub fn init_from_config(
+        &mut self,
+        osc_port: u16,
+        #[cfg(target_os = "macos")] syphon_output_name: String,
+        #[cfg(feature = "ndi")] ndi_output_name: String,
+        #[cfg(target_os = "linux")] v4l2_output_path: String,
+    ) {
+        self.osc_port = osc_port;
+        #[cfg(target_os = "macos")]
+        { self.syphon_output_name = syphon_output_name; }
+        #[cfg(feature = "ndi")]
+        { self.ndi_output_name = ndi_output_name; }
+        #[cfg(target_os = "linux")]
+        {
+            self.v4l2_output_path = v4l2_output_path;
+        }
+    }
+
+    /// Get the current OSC port
+    pub fn osc_port(&self) -> u16 {
+        self.osc_port
+    }
+
 
     /// Show/hide the window
     pub fn toggle(&mut self) {
@@ -303,6 +388,88 @@ impl VideoSettingsWindow {
         self.ndi_output_active = active;
     }
 
+    // --- V4L2 accessors (Linux) ---
+
+    #[cfg(target_os = "linux")]
+    pub fn take_start_v4l2_requested(&mut self) -> bool {
+        let v = self.start_v4l2_requested;
+        self.start_v4l2_requested = false;
+        v
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn selected_v4l2_capture_path(&self) -> Option<&str> {
+        if self.selected_v4l2_capture >= 0
+            && (self.selected_v4l2_capture as usize) < self.v4l2_capture_devices.len()
+        {
+            Some(&self.v4l2_capture_devices[self.selected_v4l2_capture as usize].path)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn v4l2_output_path(&self) -> &str {
+        &self.v4l2_output_path
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn take_start_v4l2_output_requested(&mut self) -> bool {
+        let v = self.start_v4l2_output_requested;
+        self.start_v4l2_output_requested = false;
+        v
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn take_stop_v4l2_output_requested(&mut self) -> bool {
+        let v = self.stop_v4l2_output_requested;
+        self.stop_v4l2_output_requested = false;
+        v
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn set_v4l2_output_active(&mut self, active: bool) {
+        self.v4l2_output_active = active;
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn v4l2_needs_refresh(&self) -> bool {
+        self.v4l2_needs_refresh
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn update_v4l2_devices(
+        &mut self,
+        capture: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
+        output: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
+    ) {
+        self.v4l2_capture_devices = capture;
+        self.v4l2_output_devices = output;
+
+        if self.v4l2_capture_devices.is_empty() {
+            self.selected_v4l2_capture = -1;
+        } else if self.selected_v4l2_capture < 0
+            || self.selected_v4l2_capture as usize >= self.v4l2_capture_devices.len()
+        {
+            self.selected_v4l2_capture = 0;
+        }
+
+        if let Some(pos) = self
+            .v4l2_output_devices
+            .iter()
+            .position(|d| d.path == self.v4l2_output_path)
+        {
+            self.selected_v4l2_output = pos as i32;
+        } else if !self.v4l2_output_devices.is_empty() {
+            self.selected_v4l2_output = 0;
+            self.v4l2_output_path = self.v4l2_output_devices[0].path.clone();
+        } else {
+            self.selected_v4l2_output = -1;
+        }
+
+        self.v4l2_needs_refresh = false;
+    }
+
     pub fn set_initializing(&mut self, initializing: bool) {
         self.initializing = initializing;
     }
@@ -336,40 +503,30 @@ impl VideoSettingsWindow {
                 ui.text("Input Source");
                 ui.separator();
 
-                let mut type_idx = match self.input_source_type {
-                    InputSourceType::Webcam => 0,
-                    #[cfg(target_os = "macos")]
-                    InputSourceType::Syphon => 1,
-                    #[cfg(feature = "ndi")]
-                    InputSourceType::Ndi => {
-                        #[cfg(target_os = "macos")]
-                        { 2 }
-                        #[cfg(not(target_os = "macos"))]
-                        { 1 }
-                    }
-                };
+                // Build ordered list of available source types for this platform/features.
+                // Kept consistent with the match-arms below that translate index -> type.
+                let mut source_types: Vec<InputSourceType> = Vec::new();
+                source_types.push(InputSourceType::Webcam);
+                #[cfg(target_os = "macos")]
+                source_types.push(InputSourceType::Syphon);
+                #[cfg(feature = "ndi")]
+                source_types.push(InputSourceType::Ndi);
+                #[cfg(target_os = "linux")]
+                source_types.push(InputSourceType::V4l2);
 
-                let source_names: Vec<&str> = [
-                    Some(InputSourceType::Webcam.name()),
-                    #[cfg(target_os = "macos")]
-                    Some(InputSourceType::Syphon.name()),
-                    #[cfg(feature = "ndi")]
-                    Some(InputSourceType::Ndi.name()),
-                ].into_iter().flatten().collect();
+                let mut type_idx: usize = source_types
+                    .iter()
+                    .position(|t| *t == self.input_source_type)
+                    .unwrap_or(0);
+
+                let source_names: Vec<&str> = source_types.iter().map(|t| t.name()).collect();
 
                 if !source_names.is_empty() {
                     ui.set_next_item_width(200.0);
                     if ui.combo_simple_string("Source Type", &mut type_idx, &source_names) {
-                        self.input_source_type = match type_idx {
-                            0 => InputSourceType::Webcam,
-                            #[cfg(target_os = "macos")]
-                            1 => InputSourceType::Syphon,
-                            #[cfg(all(target_os = "macos", feature = "ndi"))]
-                            2 => InputSourceType::Ndi,
-                            #[cfg(all(not(target_os = "macos"), feature = "ndi"))]
-                            1 => InputSourceType::Ndi,
-                            _ => InputSourceType::Webcam,
-                        };
+                        if let Some(t) = source_types.get(type_idx) {
+                            self.input_source_type = *t;
+                        }
                     }
                 }
 
@@ -395,6 +552,19 @@ impl VideoSettingsWindow {
                         if Self::draw_ndi_controls_helper(&mut self.ndi_sources, &mut self.selected_ndi_source,
                             &mut self.ndi_needs_refresh, self.initializing, &mut self.last_error, ui) {
                             self.start_ndi_requested = true;
+                        }
+                    }
+                    #[cfg(target_os = "linux")]
+                    InputSourceType::V4l2 => {
+                        if Self::draw_v4l2_controls_helper(
+                            &mut self.v4l2_capture_devices,
+                            &mut self.selected_v4l2_capture,
+                            &mut self.v4l2_needs_refresh,
+                            self.initializing,
+                            &mut self.last_error,
+                            ui,
+                        ) {
+                            self.start_v4l2_requested = true;
                         }
                     }
                 }
@@ -448,7 +618,70 @@ impl VideoSettingsWindow {
                             self.start_ndi_output_requested = true;
                         }
                     }
+                    ui.spacing();
                 }
+
+                // V4L2 loopback output (Linux)
+                #[cfg(target_os = "linux")]
+                {
+                    ui.text_colored([0.8, 0.8, 0.2, 1.0], "V4L2 Loopback (Linux)");
+                    ui.text_disabled("Requires v4l2loopback kernel module");
+
+                    if !self.v4l2_output_devices.is_empty() {
+                        let labels: Vec<String> = self
+                            .v4l2_output_devices
+                            .iter()
+                            .map(|d| d.display_name())
+                            .collect();
+                        let label_refs: Vec<&str> =
+                            labels.iter().map(|s| s.as_str()).collect();
+                        let mut sel: usize = self.selected_v4l2_output.max(0) as usize;
+                        ui.set_next_item_width(300.0);
+                        if ui.combo_simple_string("Loopback Device", &mut sel, &label_refs) {
+                            self.selected_v4l2_output = sel as i32;
+                            if let Some(d) = self.v4l2_output_devices.get(sel) {
+                                self.v4l2_output_path = d.path.clone();
+                            }
+                        }
+                    } else {
+                        ui.text_disabled("No v4l2loopback devices found");
+                        ui.set_next_item_width(200.0);
+                        ui.input_text("Device Path", &mut self.v4l2_output_path).build();
+                    }
+
+                    let active = self.v4l2_output_active;
+                    if active {
+                        ui.text_colored(
+                            [0.0, 1.0, 0.0, 1.0],
+                            &format!("V4L2 Active: {}", self.v4l2_output_path),
+                        );
+                        ui.same_line();
+                        if ui.button("Stop V4L2 Output") {
+                            self.stop_v4l2_output_requested = true;
+                        }
+                    } else {
+                        ui.text_disabled("V4L2: Inactive");
+                        ui.same_line();
+                        if ui.button("Start V4L2 Output") {
+                            self.start_v4l2_output_requested = true;
+                        }
+                    }
+                }
+                // OSC Settings
+                ui.spacing();
+                ui.spacing();
+                ui.text("OSC");
+                ui.separator();
+                ui.spacing();
+
+                ui.text("Receive Port:");
+                ui.same_line();
+                let mut osc_port_i32 = self.osc_port as i32;
+                ui.set_next_item_width(100.0);
+                if ui.input_int("##osc_port", &mut osc_port_i32).build() {
+                    self.osc_port = osc_port_i32.clamp(1024, 65535) as u16;
+                }
+                ui.text_disabled(format!("OSC addresses: /rustjay404/trigger, /rustjay404/volume, etc."));
             });
 
         self.visible = opened;
@@ -720,6 +953,80 @@ impl VideoSettingsWindow {
            (*selected_ndi_source as usize) < ndi_sources.len() {
             ui.text("Selected:");
             ui.text(format!("  Source: {}", ndi_sources[*selected_ndi_source as usize]));
+        }
+
+        start_requested
+    }
+
+    /// Returns true if the user clicked "Start V4L2 Input".
+    #[cfg(target_os = "linux")]
+    fn draw_v4l2_controls_helper(
+        devices: &mut Vec<crate::v4l2_devices::V4l2DeviceInfo>,
+        selected: &mut i32,
+        needs_refresh: &mut bool,
+        initializing: bool,
+        last_error: &mut Option<String>,
+        ui: &Ui,
+    ) -> bool {
+        let mut start_requested = false;
+
+        ui.text("V4L2 Capture Device");
+        ui.separator();
+
+        if ui.button("Refresh Devices") {
+            *needs_refresh = true;
+        }
+        ui.same_line();
+
+        if devices.is_empty() {
+            ui.text_disabled("(No devices found)");
+        } else {
+            ui.text(format!("({} devices)", devices.len()));
+        }
+
+        ui.spacing();
+
+        if initializing {
+            ui.text_colored([1.0, 0.8, 0.0, 1.0], "Opening device...");
+        }
+
+        if let Some(ref error) = last_error {
+            ui.text_colored([1.0, 0.0, 0.0, 1.0], "Error:");
+            ui.text_wrapped(error);
+            if ui.button("Clear Error") {
+                *last_error = None;
+            }
+            ui.spacing();
+        }
+
+        if !devices.is_empty() {
+            let labels: Vec<String> = devices.iter().map(|d| d.display_name()).collect();
+            let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+            let mut sel: usize = (*selected).max(0) as usize;
+            ui.set_next_item_width(300.0);
+            if ui.combo_simple_string("Device", &mut sel, &label_refs) {
+                *selected = sel as i32;
+            }
+
+            ui.spacing();
+            if !initializing && ui.button("Start V4L2 Input") {
+                start_requested = true;
+            }
+        } else {
+            ui.text_disabled("No V4L2 capture devices available");
+            if *needs_refresh {
+                ui.text("(Click Refresh to scan)");
+            }
+        }
+
+        ui.spacing();
+        ui.separator();
+
+        if let Some(d) = devices.get((*selected).max(0) as usize) {
+            ui.text("Selected:");
+            ui.text(format!("  Path: {}", d.path));
+            ui.text(format!("  Card: {}", d.card));
+            ui.text(format!("  Driver: {}", d.driver));
         }
 
         start_requested
