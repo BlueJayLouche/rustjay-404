@@ -19,6 +19,7 @@ A high-performance video sampler inspired by the Roland SP-404, built in Rust wi
 - **NDI I/O**: Network Device Interface input and output for video over IP (optional)
 - **Syphon I/O**: Zero-copy GPU-path Syphon input and output (macOS)
 - **Spout Output**: D3D11 shared texture output to Resolume, OBS, etc. (Windows)
+- **V4L2 Loopback**: Virtual webcam output via v4l2loopback kernel module (Linux)
 - **Pro I/O**: MIDI input for pad triggering, OSC server for remote control
 - **Tap Tempo**: Shift+T for tap tempo with automatic phase reset
 - **SP-404 Style Interface**: 16-pad grid with GATE, LATCH, and ONE-SHOT trigger modes
@@ -109,6 +110,7 @@ Working implementation with:
 - ✅ NDI input/output (Network Device Interface, optional)
 - ✅ Syphon input/output with zero-copy GPU path (macOS)
 - ✅ Spout output via D3D11 shared textures (Windows)
+- ✅ V4L2 loopback output and capture input (Linux)
 - ✅ Tap tempo with phase reset
 - ✅ Persistent window layout
 - ✅ JSON preset save/load
@@ -188,6 +190,31 @@ For encoding your source videos to HAP format, see the FFmpeg section above.
 Spout is enabled automatically on Windows. No extra dependencies are required — the Spout sender protocol is implemented directly using the Windows D3D11 and DXGI APIs (via the `windows` crate).
 
 Open Resolume Arena, OBS (with [OBS-Spout2-Plugin](https://github.com/Off-World-Live/obs-spout2-plugin)), or any Spout-capable app on the same machine to receive the output.
+
+### V4L2 Loopback (Linux Only)
+
+V4L2 loopback output lets RustJay 404 appear as a virtual webcam that any V4L2-capable app (OBS, Zoom, ffplay, browsers) can read.
+
+Install the kernel module:
+```bash
+# Ubuntu/Debian
+sudo apt install v4l2loopback-dkms
+
+# Load the module and create a virtual device
+sudo modprobe v4l2loopback devices=1 video_nr=10 \
+    card_label="RustJay 404" exclusive_caps=1
+```
+
+Then use the **V4L2 Loopback** section in the Video Settings window to start output on `/dev/video10` (or whichever device was created).
+
+For persistent setup, add to `/etc/modules-load.d/v4l2loopback.conf`:
+```
+v4l2loopback
+```
+And to `/etc/modprobe.d/v4l2loopback.conf`:
+```
+options v4l2loopback devices=1 video_nr=10 card_label="RustJay 404" exclusive_caps=1
+```
 
 ### Building from Source
 
