@@ -16,8 +16,9 @@ A high-performance video sampler inspired by the Roland SP-404, built in Rust wi
   - **Keying**: Chroma Key (green/blue screen), Luma Key (brightness-based)
 - **Per-Channel Controls**: Opacity, mix mode, and keying parameters per channel
 - **Live Sampling**: Capture from webcam or Syphon input, auto-convert to HAP, assign to pads
-- **NDI I/O**: Network Device Interface input and output for video over IP
+- **NDI I/O**: Network Device Interface input and output for video over IP (optional)
 - **Syphon I/O**: Zero-copy GPU-path Syphon input and output (macOS)
+- **Spout Output**: D3D11 shared texture output to Resolume, OBS, etc. (Windows)
 - **Pro I/O**: MIDI input for pad triggering, OSC server for remote control
 - **Tap Tempo**: Shift+T for tap tempo with automatic phase reset
 - **SP-404 Style Interface**: 16-pad grid with GATE, LATCH, and ONE-SHOT trigger modes
@@ -105,8 +106,9 @@ Working implementation with:
 - ✅ MIDI input for pad triggering
 - ✅ OSC server for remote control
 - ✅ Live webcam sampling
-- ✅ NDI input/output (Network Device Interface)
+- ✅ NDI input/output (Network Device Interface, optional)
 - ✅ Syphon input/output with zero-copy GPU path (macOS)
+- ✅ Spout output via D3D11 shared textures (Windows)
 - ✅ Tap tempo with phase reset
 - ✅ Persistent window layout
 - ✅ JSON preset save/load
@@ -160,24 +162,32 @@ If you see `dyld: Library not loaded: Syphon.framework` at runtime:
 SYPHON_FRAMEWORK_DIR=/path/to/syphon-rs/syphon-lib cargo build --release
 ```
 
-### NDI (Network Device Interface)
+### NDI (Network Device Interface, Optional)
 
-NDI support is enabled by default via the `ndi` feature flag. It requires the NDI SDK for Apple to be installed.
+NDI is not included in the default build. To enable:
 
-**Install the NDI SDK:**
+```bash
+cargo build --release --features ndi
+```
+
+This requires the NDI SDK and LLVM to be installed:
 1. Download from [ndi.video](https://ndi.video/tools/download/)
 2. Run the installer — it places `libndi.dylib` in `/Library/NDI SDK for Apple/lib/macOS/`
+3. On Windows, install [LLVM](https://github.com/llvm/llvm-project/releases) and set `LIBCLANG_PATH=C:\Program Files\LLVM\bin`
 
-The build script automatically adds the NDI SDK library path to the binary's rpath. To disable NDI:
-```bash
-cargo build --release --no-default-features
-```
+The build script automatically adds the NDI SDK library path to the binary's rpath.
 
 ### HAP Playback (`hap-rs`)
 
 HAP video decoding uses the [`hap-rs`](https://github.com/BlueJayLouche/hap-rs) crate (fetched automatically via Cargo). No additional installation is required.
 
 For encoding your source videos to HAP format, see the FFmpeg section above.
+
+### Spout (Windows Only)
+
+Spout is enabled automatically on Windows. No extra dependencies are required — the Spout sender protocol is implemented directly using the Windows D3D11 and DXGI APIs (via the `windows` crate).
+
+Open Resolume Arena, OBS (with [OBS-Spout2-Plugin](https://github.com/Off-World-Live/obs-spout2-plugin)), or any Spout-capable app on the same machine to receive the output.
 
 ### Building from Source
 
@@ -187,10 +197,12 @@ Requires Rust 1.70+ and a GPU with BC texture compression support.
 cargo build --release
 ```
 
-To build without NDI:
+The default build works on macOS, Windows, and Linux with no extra dependencies beyond the Rust toolchain and platform build tools.
+
+To build with NDI:
 
 ```bash
-cargo build --release --no-default-features
+cargo build --release --features ndi
 ```
 
 ## License

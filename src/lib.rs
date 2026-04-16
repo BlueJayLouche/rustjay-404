@@ -11,6 +11,8 @@ pub mod ui;
 pub mod util;
 pub mod video;
 pub mod video_input;
+#[cfg(target_os = "linux")]
+pub mod v4l2_devices;
 
 // Re-export commonly used types
 pub use app::App;

@@ -364,6 +364,27 @@ impl OutputManager {
         false
     }
 
+    // --- V4L2 loopback output (Linux) ---
+
+    /// Start V4L2 loopback output (Linux only, stub until fully implemented).
+    #[cfg(target_os = "linux")]
+    pub fn start_v4l2(&mut self, path: &str, _width: u32, _height: u32) -> anyhow::Result<()> {
+        log::info!("V4L2 loopback output requested on '{}' (not yet implemented)", path);
+        Err(anyhow::anyhow!("V4L2 loopback output not yet implemented for path '{}'", path))
+    }
+
+    /// Stop V4L2 loopback output (Linux only).
+    #[cfg(target_os = "linux")]
+    pub fn stop_v4l2(&mut self) {
+        log::info!("V4L2 loopback output stopped (was not active)");
+    }
+
+    /// Returns true if a V4L2 loopback output is currently active.
+    #[cfg(target_os = "linux")]
+    pub fn is_v4l2_active(&self) -> bool {
+        false
+    }
+
     // --- Readback pool queries ---
 
     /// Returns true if any CPU-path output (NDI, Spout, V4L2) needs readback.

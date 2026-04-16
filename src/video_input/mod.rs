@@ -59,6 +59,10 @@ struct DiscoveryResults {
     syphon_servers: Vec<SyphonServerInfo>,
     #[cfg(feature = "ndi")]
     ndi_sources: Vec<String>,
+    #[cfg(target_os = "linux")]
+    v4l2_capture_devices: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
+    #[cfg(target_os = "linux")]
+    v4l2_output_devices: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
 }
 
 /// Unified frame type for recording pipeline
@@ -149,6 +153,10 @@ pub struct VideoInputManager {
     pub syphon_servers: Vec<SyphonServerInfo>,
     #[cfg(feature = "ndi")]
     pub ndi_sources: Vec<String>,
+    #[cfg(target_os = "linux")]
+    pub v4l2_capture_devices: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
+    #[cfg(target_os = "linux")]
+    pub v4l2_output_devices: Vec<crate::v4l2_devices::V4l2DeviceInfo>,
 
     // Async discovery
     discovery_rx: Option<mpsc::Receiver<DiscoveryResults>>,
@@ -173,6 +181,10 @@ impl VideoInputManager {
             syphon_servers: Vec::new(),
             #[cfg(feature = "ndi")]
             ndi_sources: Vec::new(),
+            #[cfg(target_os = "linux")]
+            v4l2_capture_devices: Vec::new(),
+            #[cfg(target_os = "linux")]
+            v4l2_output_devices: Vec::new(),
             discovery_rx: None,
             discovering: false,
         }
@@ -242,12 +254,23 @@ impl VideoInputManager {
                 sources
             };
 
+            #[cfg(target_os = "linux")]
+            let (v4l2_capture_devices, v4l2_output_devices) = {
+                let (cap, out) = crate::v4l2_devices::enumerate_devices();
+                log::info!("[VideoInput] Found {} V4L2 capture, {} V4L2 output devices", cap.len(), out.len());
+                (cap, out)
+            };
+
             let _ = tx.send(DiscoveryResults {
                 webcam_devices,
                 #[cfg(target_os = "macos")]
                 syphon_servers,
                 #[cfg(feature = "ndi")]
                 ndi_sources,
+                #[cfg(target_os = "linux")]
+                v4l2_capture_devices,
+                #[cfg(target_os = "linux")]
+                v4l2_output_devices,
             });
         });
     }
@@ -265,6 +288,11 @@ impl VideoInputManager {
                     #[cfg(feature = "ndi")]
                     {
                         self.ndi_sources = results.ndi_sources;
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        self.v4l2_capture_devices = results.v4l2_capture_devices;
+                        self.v4l2_output_devices = results.v4l2_output_devices;
                     }
                     self.discovering = false;
                     self.discovery_rx = None;
@@ -378,6 +406,15 @@ impl VideoInputManager {
     #[cfg(not(feature = "ndi"))]
     pub fn start_ndi(&mut self, _source_name: &str) -> anyhow::Result<()> {
         Err(anyhow::anyhow!("NDI support not compiled. Enable the 'ndi' feature."))
+    }
+
+    /// Start V4L2 capture input (Linux only, stops current input first).
+    #[cfg(target_os = "linux")]
+    pub fn start_v4l2(&mut self, path: &str) -> anyhow::Result<()> {
+        self.stop();
+        log::info!("[VideoInput] Starting V4L2 capture from '{}'", path);
+        // V4L2 capture is handled via nokhwa's native backend; stub for now.
+        Err(anyhow::anyhow!("V4L2 capture not yet implemented for path '{}'", path))
     }
 
     /// Returns true if the NDI source was lost
