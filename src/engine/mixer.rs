@@ -288,8 +288,8 @@ impl VideoMixer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Mixer Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         // Create shader
@@ -329,7 +329,7 @@ impl VideoMixer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -360,7 +360,7 @@ impl VideoMixer {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
         
@@ -491,6 +491,7 @@ impl VideoMixer {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: dest_view,
                     resolve_target: None,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,  // PRESERVE existing content
                         store: wgpu::StoreOp::Store,
@@ -498,6 +499,7 @@ impl VideoMixer {
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
                 timestamp_writes: None,
             });
 
@@ -520,6 +522,7 @@ impl VideoMixer {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
+                depth_slice: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
@@ -527,6 +530,7 @@ impl VideoMixer {
             })],
             depth_stencil_attachment: None,
             occlusion_query_set: None,
+            multiview_mask: None,
             timestamp_writes: None,
         });
     }

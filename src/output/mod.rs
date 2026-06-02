@@ -192,7 +192,7 @@ impl ReadbackPool {
     fn drain(&mut self, device: &wgpu::Device) {
         for slot in &mut self.slots {
             if matches!(slot, SlotState::Pending { .. }) {
-                device.poll(wgpu::PollType::Wait).ok();
+                device.poll(wgpu::PollType::wait_indefinitely()).ok();
                 if let SlotState::Pending { buffer, .. } =
                     std::mem::replace(slot, SlotState::Available)
                 {

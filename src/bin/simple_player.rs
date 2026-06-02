@@ -132,7 +132,7 @@ fn main() -> anyhow::Result<()> {
     let window = std::sync::Arc::new(event_loop.create_window(window_attrs)?);
     
     // Create wgpu instance
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let surface = instance.create_surface(window.clone())?;
     
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -156,6 +156,7 @@ fn main() -> anyhow::Result<()> {
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::default(),
             trace: wgpu::Trace::Off,
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
         },
     ))?;
     
@@ -249,8 +250,8 @@ fn main() -> anyhow::Result<()> {
     
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Pipeline Layout"),
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
     });
     
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -275,7 +276,7 @@ fn main() -> anyhow::Result<()> {
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     });
     
@@ -284,7 +285,7 @@ fn main() -> anyhow::Result<()> {
         address_mode_v: wgpu::AddressMode::ClampToEdge,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
         ..Default::default()
     });
     
@@ -402,7 +403,11 @@ fn main() -> anyhow::Result<()> {
                         label: Some("Frame Bind Group"),
                     });
                     
-                    let output = surface.get_current_texture().unwrap();
+                    let output = match surface.get_current_texture() {
+                        wgpu::CurrentSurfaceTexture::Success(st)
+                        | wgpu::CurrentSurfaceTexture::Suboptimal(st) => st,
+                        other => panic!("surface texture unavailable: {:?}", other),
+                    };
                     let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
                     
                     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -415,6 +420,7 @@ fn main() -> anyhow::Result<()> {
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                                 view: &view,
                                 resolve_target: None,
+                                depth_slice: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                     store: wgpu::StoreOp::Store,
@@ -422,6 +428,7 @@ fn main() -> anyhow::Result<()> {
                             })],
                             depth_stencil_attachment: None,
                             occlusion_query_set: None,
+                            multiview_mask: None,
                             timestamp_writes: None,
                         });
                         

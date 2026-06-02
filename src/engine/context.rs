@@ -17,9 +17,9 @@ impl WgpuContext {
         let size = window.inner_size();
 
         // Create instance
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         // Create surface
@@ -53,6 +53,7 @@ impl WgpuContext {
                     label: Some("Device"),
                     memory_hints: wgpu::MemoryHints::Performance,
                     trace: wgpu::Trace::Off,
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 },
             )
             .await?;
@@ -122,7 +123,7 @@ impl WgpuContext {
     }
 
     /// Get current surface texture
-    pub fn get_current_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+    pub fn get_current_texture(&self) -> wgpu::CurrentSurfaceTexture {
         self.surface.get_current_texture()
     }
 
@@ -171,7 +172,7 @@ impl WgpuContext {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         })
     }

@@ -259,14 +259,14 @@ impl HapDecoder {
         // SAFETY: queue is valid for the lifetime of the decoder
         unsafe {
             (*self.queue).write_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 &compressed_data,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(row_pitch as u32),
                     rows_per_image: Some(blocks_y),

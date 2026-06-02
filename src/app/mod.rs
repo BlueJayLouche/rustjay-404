@@ -355,9 +355,9 @@ impl App {
     /// Initialize wgpu for both windows (output creates device, control shares it)
     async fn init_wgpu(&mut self) -> anyhow::Result<()> {
         // Create shared wgpu instance
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         
         // Create output surface
@@ -392,6 +392,7 @@ impl App {
                     label: Some("Shared Device"),
                     memory_hints: wgpu::MemoryHints::Performance,
                     trace: wgpu::Trace::Off,
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 },
             )
             .await?;
@@ -503,7 +504,7 @@ impl App {
         let control_surface = instance.create_surface(control_window.clone())?;
         
         // Get adapter for surface capabilities
-        let adapters = instance.enumerate_adapters(wgpu::Backends::all());
+        let adapters = instance.enumerate_adapters(wgpu::Backends::all()).await;
         let control_caps = if let Some(adapter) = adapters.first() {
             control_surface.get_capabilities(adapter)
         } else {
@@ -1147,7 +1148,11 @@ impl App {
         let device = self.wgpu_device.as_ref().unwrap();
         let queue = self.wgpu_queue.as_ref().unwrap();
         
-        let output = surface.get_current_texture()?;
+        let output = match surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(st)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(st) => st,
+            other => return Err(anyhow::anyhow!("surface texture unavailable: {:?}", other)),
+        };
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1258,7 +1263,11 @@ impl App {
         let device = self.wgpu_device.as_ref().unwrap().clone();
         let queue = self.wgpu_queue.as_ref().unwrap().clone();
         
-        let output = self.control_context.as_ref().unwrap().surface.get_current_texture()?;
+        let output = match self.control_context.as_ref().unwrap().surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(st)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(st) => st,
+            other => return Err(anyhow::anyhow!("surface texture unavailable: {:?}", other)),
+        };
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1271,6 +1280,7 @@ impl App {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &view,
                 resolve_target: None,
+                depth_slice: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
                         r: 0.05,
@@ -1283,6 +1293,7 @@ impl App {
             })],
             depth_stencil_attachment: None,
             occlusion_query_set: None,
+            multiview_mask: None,
             timestamp_writes: None,
         });
         drop(_render_pass);
@@ -1461,6 +1472,7 @@ impl App {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
+                depth_slice: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
                         r: 0.05,
@@ -1473,6 +1485,7 @@ impl App {
             })],
             depth_stencil_attachment: None,
             occlusion_query_set: None,
+            multiview_mask: None,
             timestamp_writes: None,
         });
     }
