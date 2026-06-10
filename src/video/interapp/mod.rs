@@ -142,7 +142,13 @@ pub fn create_output(
         
         #[cfg(target_os = "windows")]
         InterAppOutput::Spout => {
-            Box::new(SpoutOutput::new(name, device, width, height))
+            match SpoutOutput::new(name) {
+                Ok(output) => Box::new(output),
+                Err(e) => {
+                    panic!("Failed to create Spout output: {}. \
+                        Ensure DirectX 11 is available.", e)
+                }
+            }
         }
         
         #[cfg(target_os = "linux")]
@@ -173,7 +179,9 @@ pub fn try_create_output(
         
         #[cfg(target_os = "windows")]
         InterAppOutput::Spout => {
-            Some(Box::new(SpoutOutput::new(name, device, width, height)))
+            SpoutOutput::new(name)
+                .ok()
+                .map(|o| Box::new(o) as Box<dyn InterAppVideo>)
         }
         
         #[cfg(target_os = "linux")]

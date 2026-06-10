@@ -10,11 +10,12 @@ fn debug_log(msg: &str) {
     static DEBUG_LOG: OnceLock<std::sync::Mutex<std::fs::File>> = OnceLock::new();
     
     let mutex = DEBUG_LOG.get_or_init(|| {
+        let path = std::env::temp_dir().join("rustjay404_debug.log");
         Mutex::new(
             OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("/tmp/rustjay404_debug.log")
+                .open(&path)
                 .unwrap()
         )
     });

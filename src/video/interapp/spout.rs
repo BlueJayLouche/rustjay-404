@@ -61,6 +61,11 @@ pub struct SpoutOutput {
     _sender_info_map: HANDLE,
 }
 
+// D3D11 objects are used from a single thread; mark Send/Sync so the type
+// satisfies the InterAppVideo trait bounds.
+unsafe impl Send for SpoutOutput {}
+unsafe impl Sync for SpoutOutput {}
+
 impl SpoutOutput {
     pub fn new(name: &str) -> anyhow::Result<Self> {
         unsafe {
@@ -344,6 +349,26 @@ impl SpoutOutput {
             UnmapViewOfFile(view).ok();
         }
         CloseHandle(hmap).ok();
+    }
+}
+
+impl super::InterAppVideo for SpoutOutput {
+    fn publish_frame(&mut self, _texture: &wgpu::Texture, _device: &wgpu::Device, _queue: &wgpu::Queue) {
+        // SpoutOutput is driven via OutputManager + submit_bytes() using the
+        // async readback pool. This trait method is not used on Windows.
+        log::trace!("[Spout] publish_frame called on '{}' (noop)", self.sender_name);
+    }
+
+    fn receive_frame(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue) -> Option<wgpu::Texture> {
+        None
+    }
+
+    fn name(&self) -> &str {
+        &self.sender_name
+    }
+
+    fn is_available() -> bool {
+        true
     }
 }
 
